@@ -1,7 +1,7 @@
 # =============================================================
-# DROPNODE MX — telegram_bot.py
-# Publica alertas en los canales de Telegram
-# Formato distinto para canal Free vs VIP
+# DROPNODE MX — telegram_bot.py  (version final)
+# Publica alertas, mensajes financieros, recordatorios VIP
+# y resumen diario con datos reales en ambos canales
 # =============================================================
 
 import requests
@@ -9,253 +9,345 @@ import logging
 import urllib.parse
 from datetime import datetime
 from config import (
-    TELEGRAM_TOKEN, CHANNEL_FREE_ID,
-    CHANNEL_VIP_ID, ML_AFFILIATE_ID, AMAZON_TAG,
-    HORA_INICIO_ENVIOS, HORA_FIN_ENVIOS
+    TELEGRAM_TOKEN, CHANNEL_FREE_ID, CHANNEL_VIP_ID, GROUP_ID,
+    ML_AFFILIATE_ID, AMAZON_TAG, LAUNCHPASS_LINK,
+    HORA_INICIO_ENVIOS, HORA_FIN_ENVIOS,
+    PRODUCTOS_FINANCIEROS
 )
 from heat_score import interpretar_score
 from database import guardar_alerta
 
-logger = logging.getLogger(__name__)
-
+logger       = logging.getLogger(__name__)
 TELEGRAM_API = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}"
 
 
 # ─────────────────────────────────────────────
-#  HORARIO DE ENVÍO
+#  HORARIO
 # ─────────────────────────────────────────────
 
-def dentro_de_horario() -> bool:
-    """Verifica que estemos en el horario de operación."""
+def dentro_de_horario():
     hora = datetime.now().hour
     return HORA_INICIO_ENVIOS <= hora < HORA_FIN_ENVIOS
 
 
 # ─────────────────────────────────────────────
-#  GENERACIÓN DE LINKS DE AFILIADO
+#  LINKS DE AFILIADO
 # ─────────────────────────────────────────────
 
-def link_afiliado_ml(url: str, item_id: str) -> str:
-    """
-    Genera link de afiliado para Mercado Libre.
-    Formato oficial del programa de afiliados ML.
-    """
+def link_afiliado_ml(url, item_id):
     if not ML_AFFILIATE_ID:
         return url
-
-    # Parámetros de tracking estándar de ML Afiliados
-    base = "https://go.mercadolibre.com.mx"
     params = urllib.parse.urlencode({
-        "as_src":        "affiliate",
-        "as_plataforma": "telegram",
-        "as_campaign":   "dropnodemx",
-        "as_content":    item_id,
-        "url":           url,
-        "affiliate_id":  ML_AFFILIATE_ID,
+        "as_src":       "affiliate",
+        "as_campaign":  "dropnodemx",
+        "as_content":   item_id,
+        "url":          url,
+        "affiliate_id": ML_AFFILIATE_ID,
     })
-    return f"{base}?{params}"
+    return f"https://go.mercadolibre.com.mx?{params}"
 
 
-def link_afiliado_amazon(url: str) -> str:
-    """Agrega tag de afiliado Amazon si está configurado."""
+def link_afiliado_amazon(url):
     if not AMAZON_TAG:
         return url
     sep = "&" if "?" in url else "?"
     return f"{url}{sep}tag={AMAZON_TAG}"
 
 
+def link_afiliado_auto(url, item_id=""):
+    """Detecta la tienda y aplica el afiliado correcto."""
+    if "mercadolibre" in url:
+        return link_afiliado_ml(url, item_id)
+    elif "amazon.com.mx" in url or "amazon.mx" in url:
+        return link_afiliado_amazon(url)
+    return url
+
+
 # ─────────────────────────────────────────────
-#  FORMATEO DE MENSAJES
+#  FORMATO DE ALERTAS
 # ─────────────────────────────────────────────
 
-def formatear_mensaje_vip(alerta: dict) -> str:
-    """
-    Mensaje para canal VIP — más detallado, urgente, con tips de flip.
-    """
-    interp      = interpretar_score(alerta["heat_score"])
-    nombre      = alerta["nombre"][:60]
-    precio_act  = alerta["precio_actual"]
-    precio_min  = alerta["precio_minimo"]
-    precio_orig = alerta["precio_original"]
-    descuento   = alerta["descuento_real"] * 100
-    stock       = alerta["stock"]
-    cat_emoji   = alerta["categoria"]["emoji"]
-    link        = link_afiliado_ml(alerta["permalink"], alerta["item_id"])
-    score       = alerta["heat_score"]
+def formatear_mensaje_vip(alerta):
+    interp    = interpretar_score(alerta["heat_score"])
+    nombre    = alerta["nombre"][:60]
+    p_act     = alerta["precio_actual"]
+    p_ref     = alerta["precio_minimo"]
+    descuento = alerta["descuento_real"] * 100
+    stock     = alerta["stock"]
+    emoji_cat = alerta["categoria"]["emoji"]
+    nombre_cat= alerta["categoria"]["nombre"]
+    link      = link_afiliado_auto(alerta["permalink"], alerta["item_id"])
+    score     = alerta["heat_score"]
+    es_frio   = alerta.get("modo_frio", False)
+    ref_label = "Precio tachado" if es_frio else "Minimo historico"
 
-    # Calcular precio de reventa estimado (10-20% sobre precio normal)
-    reventa_low  = precio_min * 0.85
-    reventa_high = precio_min * 0.95
-
-    # Stock urgency text
     if stock == 1:
-        stock_txt = "⚠️ *¡ÚLTIMA UNIDAD!*"
+        stock_txt = "⚠️ *¡ULTIMA UNIDAD!*"
     elif stock <= 3:
         stock_txt = f"⚠️ *Solo {stock} unidades*"
     elif stock <= 10:
-        stock_txt = f"📦 {stock} unidades disponibles"
+        stock_txt = f"📦 {stock} unidades"
     else:
-        stock_txt = f"📦 Stock disponible"
+        stock_txt = "📦 Stock disponible"
 
-    msg = f"""{interp['emoji']} *{interp['etiqueta']}* — {cat_emoji} {alerta['categoria']['nombre']}
+    reventa_low  = p_ref * 0.80
+    reventa_high = p_ref * 0.92
 
-📦 {nombre}
-
-💰 Precio actual: *${precio_act:,.0f} MXN*
-📉 Mínimo histórico: ${precio_min:,.0f} MXN
-🔥 Caída real: *−{descuento:.0f}%*
-{stock_txt}
-🎯 Heat Score: {score}/10
-
-🔗 [COMPRAR AHORA]({link})
-
-💡 _Rango de reventa estimado: ${reventa_low:,.0f}–${reventa_high:,.0f} MXN_
-
-⏰ Detectado: {datetime.now().strftime('%H:%M:%S')}"""
-
-    return msg
-
-
-def formatear_mensaje_free(alerta: dict) -> str:
-    """
-    Mensaje para canal público — más simple, con CTA al VIP.
-    """
-    interp     = interpretar_score(alerta["heat_score"])
-    nombre     = alerta["nombre"][:60]
-    precio_act = alerta["precio_actual"]
-    precio_min = alerta["precio_minimo"]
-    descuento  = alerta["descuento_real"] * 100
-    cat_emoji  = alerta["categoria"]["emoji"]
-    link       = link_afiliado_ml(alerta["permalink"], alerta["item_id"])
-
-    msg = f"""{interp['emoji']} *{interp['etiqueta']}* {cat_emoji}
-
-{nombre}
-
-💰 *${precio_act:,.0f} MXN* _(−{descuento:.0f}% vs mínimo histórico)_
-📉 Antes: ${precio_min:,.0f} MXN
-
-[Ver oferta →]({link})
-
-🔒 _Las alertas como esta llegan al canal VIP con varios minutos de ventaja._"""
-
-    return msg
+    return (
+        f"{interp['emoji']} *{interp['etiqueta']}*"
+        f" — {emoji_cat} {nombre_cat}\n\n"
+        f"📦 {nombre}\n\n"
+        f"💰 Precio ahora: *${p_act:,.0f} MXN*\n"
+        f"📉 {ref_label}: ${p_ref:,.0f} MXN\n"
+        f"🔥 Caida real: *−{descuento:.0f}%*\n"
+        f"{stock_txt}\n"
+        f"🎯 Score: {score}/10\n\n"
+        f"🔗 [COMPRAR AHORA]({link})\n\n"
+        f"💡 _Reventa estimada: ${reventa_low:,.0f}–${reventa_high:,.0f} MXN_\n"
+        f"⏰ _{datetime.now().strftime('%H:%M:%S')}_"
+    )
 
 
-def formatear_mensaje_productos_financieros() -> str:
-    """
-    Mensaje periódico de productos financieros (Plata Card, etc.)
-    Se envía automáticamente cada 7 días al canal free.
-    """
-    msg = """💳 *Mientras esperas la próxima alerta...*
+def formatear_mensaje_free(alerta):
+    interp    = interpretar_score(alerta["heat_score"])
+    nombre    = alerta["nombre"][:60]
+    p_act     = alerta["precio_actual"]
+    p_ref     = alerta["precio_minimo"]
+    descuento = alerta["descuento_real"] * 100
+    emoji_cat = alerta["categoria"]["emoji"]
+    link      = link_afiliado_auto(alerta["permalink"], alerta["item_id"])
 
-¿Ya tienes tu tarjeta sin anualidad?
-
-🔷 *Plata Card* — Sin anualidad, cashback real
-🔷 *Nu (Nubank MX)* — Tarjeta de crédito sin comisiones
-🔷 *GBM+* — Invierte desde $100 MXN
-
-💡 Usarlos para tus compras de ofertas = doble beneficio: descuento + recompensa.
-
-_Nuestro equipo los usa. Los recomendamos porque funcionan._"""
-    return msg
+    return (
+        f"{interp['emoji']} *{interp['etiqueta']}* {emoji_cat}\n\n"
+        f"{nombre}\n\n"
+        f"💰 *${p_act:,.0f} MXN* _(−{descuento:.0f}%)_\n"
+        f"📉 Ref: ${p_ref:,.0f} MXN\n\n"
+        f"[Ver oferta →]({link})\n\n"
+        f"🔒 _Canal VIP recibe estas alertas primero._\n"
+        f"_{LAUNCHPASS_LINK}_"
+    )
 
 
 # ─────────────────────────────────────────────
-#  ENVÍO DE MENSAJES
+#  MENSAJES PERIODICOS AUTOMATICOS
 # ─────────────────────────────────────────────
 
-def enviar_mensaje(chat_id: int, texto: str,
-                   parse_mode: str = "Markdown",
-                   preview: bool = False) -> int | None:
-    """
-    Envía un mensaje a un canal/grupo de Telegram.
-    Retorna el message_id si fue exitoso.
-    """
-    url = f"{TELEGRAM_API}/sendMessage"
+def formatear_mensaje_financiero():
+    """Rota entre productos financieros activos segun el dia del mes."""
+    activos = [p for p in PRODUCTOS_FINANCIEROS if p["activo"]]
+    if not activos:
+        return None
+    prod = activos[datetime.now().day % len(activos)]
+    return (
+        f"{prod['emoji']} *{prod['nombre']}*\n\n"
+        f"{prod['descripcion']}\n\n"
+        f"✅ {prod['beneficio']}\n\n"
+        f"🔗 [Conocer mas]({prod['link']})\n\n"
+        f"_Recomendado por DropNode MX — nuestro equipo lo usa._"
+    )
+
+
+def formatear_recordatorio_vip():
+    """Rota entre 3 versiones para no repetirse."""
+    versiones = [
+        (
+            "🔒 *¿Aun no estas en el canal VIP?*\n\n"
+            "Las alertas de errores de precio llegan ahi primero.\n"
+            "Un solo error de precio bien aprovechado paga meses de acceso.\n\n"
+            f"👉 {LAUNCHPASS_LINK}"
+        ),
+        (
+            "⚡ *Mientras lees esto...*\n\n"
+            "En el canal VIP ya hay alertas de stock critico esperando.\n"
+            "Las mejores oportunidades no esperan.\n\n"
+            f"🔗 {LAUNCHPASS_LINK}"
+        ),
+        (
+            "📊 *Canal VIP DropNode MX*\n\n"
+            "Errores de precio · Stock limitado · Liquidaciones\n"
+            "Todo antes que el canal publico.\n\n"
+            f"$299 MXN/mes — cancela cuando quieras\n"
+            f"👉 {LAUNCHPASS_LINK}"
+        ),
+    ]
+    idx = (datetime.now().day + datetime.now().hour) % len(versiones)
+    return versiones[idx]
+
+
+def mensaje_bienvenida_grupo():
+    """Mensaje para fijar en el grupo Community."""
+    return (
+        "👋 *Bienvenido a DropNode Community MX*\n\n"
+        "Aqui compartimos los mejores descuentos que nuestro equipo encuentra.\n\n"
+        "📢 *Canal de alertas gratuito:* @DropNodeMX\n"
+        f"🔒 *Canal VIP (errores de precio):* {LAUNCHPASS_LINK}\n\n"
+        "📌 *Reglas del grupo:*\n"
+        "• Comparte ofertas reales que hayas encontrado\n"
+        "• Sin spam ni publicidad no solicitada\n"
+        "• Respeta a todos los miembros\n\n"
+        "_DropNode MX — Siempre encontramos el mejor precio._"
+    )
+
+
+# ─────────────────────────────────────────────
+#  RESUMEN DIARIO (mejorado con datos reales)
+# ─────────────────────────────────────────────
+
+def calcular_ahorro_estimado(alertas):
+    total = 0.0
+    for a in alertas:
+        precio     = a.get("precio_alerta", 0)
+        descuento  = a.get("descuento_real", 0)
+        if precio and descuento and descuento < 1:
+            precio_original = precio / (1 - descuento)
+            total += (precio_original - precio)
+    return total
+
+
+def enviar_resumen_diario(total_vip=0, total_free=0):
+    from database import get_metricas_autolearning
+
+    alertas_hoy = []
+    try:
+        todas       = get_metricas_autolearning()
+        hoy         = str(datetime.now().date())
+        alertas_hoy = [a for a in todas
+                       if a.get("timestamp", "")[:10] == hoy]
+    except Exception:
+        pass
+
+    total_ops  = total_vip + total_free
+    ahorro_est = calcular_ahorro_estimado(alertas_hoy)
+    mejor_desc = 0.0
+    if alertas_hoy:
+        mejor_desc = max(
+            a.get("descuento_real", 0) for a in alertas_hoy
+        ) * 100
+
+    # Mensaje VIP — detallado
+    msg_vip = (
+        f"📊 *Resumen ultimas 24 hrs — DropNode MX VIP*\n\n"
+        f"🚨 Alertas exclusivas VIP: *{total_vip}*\n"
+        f"⚡ Alertas canal publico: *{total_free}*\n"
+        f"🔍 Oportunidades analizadas: *{total_ops}*\n"
+    )
+    if mejor_desc > 0:
+        msg_vip += f"🔥 Mejor descuento del dia: *−{mejor_desc:.0f}%*\n"
+    if ahorro_est > 0:
+        msg_vip += f"💰 Ahorro acumulado estimado: *~${ahorro_est:,.0f} MXN*\n"
+    msg_vip += (
+        f"\n_Nuestro equipo sigue actualizando constantemente._\n"
+        f"_Las mejores oportunidades de manana ya estan siendo monitoreadas._"
+    )
+
+    # Mensaje Free — corto con CTA
+    msg_free = (
+        f"📊 *Resumen del dia — DropNode MX*\n\n"
+        f"⚡ Oportunidades encontradas: *{total_ops}*\n"
+    )
+    if ahorro_est > 0:
+        msg_free += f"💰 Ahorro estimado del canal: *~${ahorro_est:,.0f} MXN*\n"
+    msg_free += (
+        f"\n_Nuestro equipo sigue monitoreando. Manana mas._\n\n"
+        f"🔒 *Acceso VIP — alertas antes que nadie*\n"
+        f"_{LAUNCHPASS_LINK}_"
+    )
+
+    enviar_mensaje(CHANNEL_VIP_ID, msg_vip)
+    enviar_mensaje(CHANNEL_FREE_ID, msg_free)
+
+
+# ─────────────────────────────────────────────
+#  ENVIO DE MENSAJES A TELEGRAM
+# ─────────────────────────────────────────────
+
+def enviar_mensaje(chat_id, texto, preview=False):
+    url     = f"{TELEGRAM_API}/sendMessage"
     payload = {
         "chat_id":                  chat_id,
         "text":                     texto,
-        "parse_mode":               parse_mode,
+        "parse_mode":               "Markdown",
         "disable_web_page_preview": not preview,
     }
-
     try:
         resp = requests.post(url, json=payload, timeout=15)
         data = resp.json()
-
         if data.get("ok"):
             msg_id = data["result"]["message_id"]
-            logger.info(f"[TELEGRAM ✓] chat={chat_id} | msg_id={msg_id}")
+            logger.info(f"[TG OK] chat={chat_id} msg={msg_id}")
             return msg_id
         else:
-            logger.error(f"[TELEGRAM ✗] {data.get('description', 'Error desconocido')}")
+            logger.error(f"[TG ERR] {data.get('description', '?')}")
             return None
-
     except Exception as e:
-        logger.error(f"[TELEGRAM ERROR] {e}")
+        logger.error(f"[TG EXC] {e}")
         return None
 
 
-def enviar_alerta(alerta: dict) -> bool:
-    """
-    Función principal: decide a qué canal enviar y ejecuta.
-    """
+def fijar_mensaje(chat_id, message_id):
+    """Fija un mensaje en el canal o grupo."""
+    requests.post(
+        f"{TELEGRAM_API}/pinChatMessage",
+        json={"chat_id": chat_id, "message_id": message_id},
+        timeout=10
+    )
+
+
+def enviar_y_fijar_bienvenida_grupo():
+    """Envia y fija el mensaje de bienvenida. Solo se llama una vez."""
+    texto  = mensaje_bienvenida_grupo()
+    msg_id = enviar_mensaje(GROUP_ID, texto)
+    if msg_id:
+        fijar_mensaje(GROUP_ID, msg_id)
+        logger.info(f"[BIENVENIDA] Fijada en grupo (msg_id={msg_id})")
+
+
+# ─────────────────────────────────────────────
+#  FUNCIONES PUBLICAS PARA main.py
+# ─────────────────────────────────────────────
+
+def enviar_alerta(alerta):
     if not dentro_de_horario():
-        logger.info(f"[FUERA DE HORARIO] {datetime.now().hour}h — alerta guardada para después")
         return False
 
-    score  = alerta["heat_score"]
-    interp = interpretar_score(score)
+    interp = interpretar_score(alerta["heat_score"])
     canal  = interp["canal"]
-
     if canal == "descartar":
         return False
 
     msg_id = None
-
     if canal == "vip":
-        # 1. Enviamos primero al VIP (ventaja de tiempo)
-        texto_vip = formatear_mensaje_vip(alerta)
-        msg_id = enviar_mensaje(CHANNEL_VIP_ID, texto_vip)
+        msg_id = enviar_mensaje(CHANNEL_VIP_ID,
+                                formatear_mensaje_vip(alerta))
+        if alerta["heat_score"] >= 5:
+            import time; time.sleep(3)
+            enviar_mensaje(CHANNEL_FREE_ID,
+                           formatear_mensaje_free(alerta))
+    else:
+        msg_id = enviar_mensaje(CHANNEL_FREE_ID,
+                                formatear_mensaje_free(alerta))
 
-        # 2. Si el score también aplica para free (≥5), lo mandamos después
-        if score >= 5:
-            import time
-            time.sleep(2)  # Pequeña pausa para asegurar orden
-            texto_free = formatear_mensaje_free(alerta)
-            enviar_mensaje(CHANNEL_FREE_ID, texto_free)
-
-    elif canal == "free":
-        texto_free = formatear_mensaje_free(alerta)
-        msg_id = enviar_mensaje(CHANNEL_FREE_ID, texto_free)
-
-    # Registrar en base de datos para auto-learning
     if msg_id:
         guardar_alerta(
             producto_id=alerta["producto_id"],
-            heat_score=score,
+            heat_score=alerta["heat_score"],
             canal=canal,
             precio_alerta=alerta["precio_actual"],
             descuento_real=alerta["descuento_real"],
             msg_id=msg_id
         )
-
     return msg_id is not None
 
 
-def enviar_resumen_diario(total_alertas: int,
-                           total_vip: int,
-                           total_free: int):
-    """
-    Envía resumen al canal VIP cada día a las 10 PM.
-    """
-    msg = f"""📊 *Resumen del día — DropNode MX*
+def enviar_mensaje_financiero():
+    texto = formatear_mensaje_financiero()
+    if texto:
+        enviar_mensaje(CHANNEL_FREE_ID, texto)
+        logger.info("[FINANCIERO] Publicado")
 
-🚨 Alertas VIP enviadas: *{total_vip}*
-⚡ Alertas Free enviadas: *{total_free}*
-🔍 Total oportunidades analizadas: *{total_alertas}*
 
-_El equipo nunca descansa. Mañana más._"""
-
-    enviar_mensaje(CHANNEL_VIP_ID, msg)
+def enviar_recordatorio_vip():
+    if not LAUNCHPASS_LINK:
+        return
+    enviar_mensaje(CHANNEL_FREE_ID, formatear_recordatorio_vip())
+    logger.info("[VIP CTA] Publicado")
