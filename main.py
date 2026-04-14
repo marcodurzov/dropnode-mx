@@ -1,6 +1,6 @@
 # =============================================================
-# DROPNODE MX — main.py  (version final)
-# El orquestador principal — coordina todo el sistema
+# DROPNODE MX — main.py
+# v1.3 — Agrega moderacion del grupo cada 60 segundos
 # =============================================================
 
 import schedule
@@ -16,6 +16,7 @@ from telegram_bot import (
     enviar_mensaje_financiero,
     enviar_recordatorio_vip,
     enviar_y_fijar_bienvenida_grupo,
+    revisar_actualizaciones_grupo,
 )
 from auto_learning import ejecutar_autolearning
 from heat_score import interpretar_score
@@ -25,9 +26,6 @@ from config import (
     HORAS_RECORDATORIO_VIP,
 )
 
-# ─────────────────────────────────────────────
-#  LOGGING — lo que ves en los logs de Railway
-# ─────────────────────────────────────────────
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
@@ -38,12 +36,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Contadores del dia (se reinician a medianoche)
-contadores = {
-    "vip":   0,
-    "free":  0,
-    "fecha": datetime.now().date()
-}
+contadores = {"vip": 0, "free": 0, "fecha": datetime.now().date()}
 
 
 def resetear_si_nuevo_dia():
@@ -52,12 +45,8 @@ def resetear_si_nuevo_dia():
         contadores["vip"]   = 0
         contadores["free"]  = 0
         contadores["fecha"] = hoy
-        logger.info("[RESET] Contadores reiniciados para nuevo dia")
+        logger.info("[RESET] Contadores reiniciados")
 
-
-# ─────────────────────────────────────────────
-#  CICLO PRINCIPAL (cada 15 minutos)
-# ─────────────────────────────────────────────
 
 def ciclo_completo():
     resetear_si_nuevo_dia()
@@ -74,32 +63,31 @@ def ciclo_completo():
                     contadores["vip"] += 1
                 else:
                     contadores["free"] += 1
-                time.sleep(6)  # Pausa entre alertas para no saturar el canal
+                time.sleep(6)
         logger.info(
-            f"[CICLO] Fin — "
-            f"VIP:{contadores['vip']} Free:{contadores['free']}"
+            f"[CICLO] Fin - VIP:{contadores['vip']} "
+            f"Free:{contadores['free']}"
         )
     except Exception as e:
         logger.error(f"[ERROR ciclo] {e}", exc_info=True)
 
 
-# ─────────────────────────────────────────────
-#  SCHEDULE — horario completo del sistema
-# ─────────────────────────────────────────────
-
 def configurar_schedule():
-    # Scraping y alertas — cada 15 minutos
+    # Scraping y alertas cada 15 minutos
     schedule.every(15).minutes.do(ciclo_completo)
 
-    # Mensajes de productos financieros — 2 veces al dia (11am y 6pm)
+    # Moderacion del grupo cada 60 segundos
+    schedule.every(60).seconds.do(revisar_actualizaciones_grupo)
+
+    # Mensajes financieros — 11am y 6pm en todos los canales
     for hora in HORAS_MENSAJES_FINANCIEROS:
         schedule.every().day.at(f"{hora:02d}:00").do(enviar_mensaje_financiero)
 
-    # Recordatorio canal VIP — 2 veces al dia (2pm y 8pm)
+    # Recordatorio VIP en canal free — 2pm y 8pm
     for hora in HORAS_RECORDATORIO_VIP:
         schedule.every().day.at(f"{hora:02d}:00").do(enviar_recordatorio_vip)
 
-    # Resumen diario a las 9 PM
+    # Resumen diario a las 9pm
     schedule.every().day.at("21:00").do(
         lambda: enviar_resumen_diario(
             total_vip=contadores["vip"],
@@ -111,47 +99,41 @@ def configurar_schedule():
     schedule.every(FRECUENCIA_AUTOLEARNING_HORAS).hours.do(ejecutar_autolearning)
 
     logger.info("Schedule configurado:")
-    logger.info("  Scraping:           cada 15 min")
-    logger.info(f"  Financieros:        {HORAS_MENSAJES_FINANCIEROS}h")
-    logger.info(f"  Recordatorio VIP:   {HORAS_RECORDATORIO_VIP}h")
-    logger.info("  Resumen diario:     21:00h")
-    logger.info(f"  Auto-learning:      cada {FRECUENCIA_AUTOLEARNING_HORAS}h")
+    logger.info("  Scraping:          cada 15 min")
+    logger.info("  Moderacion grupo:  cada 60 seg")
+    logger.info(f"  Financieros:       {HORAS_MENSAJES_FINANCIEROS}h")
+    logger.info(f"  Recordatorio VIP:  {HORAS_RECORDATORIO_VIP}h")
+    logger.info("  Resumen diario:    21:00h")
+    logger.info(f"  Auto-learning:     cada {FRECUENCIA_AUTOLEARNING_HORAS}h")
 
-
-# ─────────────────────────────────────────────
-#  ARRANQUE DEL SISTEMA
-# ─────────────────────────────────────────────
 
 if __name__ == "__main__":
     logger.info("\n" + "=" * 50)
-    logger.info("  DROPNODE MX — Sistema iniciado (version final)")
+    logger.info("  DROPNODE MX - Sistema v1.3")
     logger.info("=" * 50 + "\n")
 
-    # Primera vez que arranca: publica y fija bienvenida en el grupo
+    # Primera vez: publicar bienvenida en el grupo
     bandera = "grupo_bienvenida_enviada.txt"
     if not os.path.exists(bandera):
-        logger.info("[SETUP] Publicando bienvenida en grupo Community...")
+        logger.info("[SETUP] Publicando bienvenida en grupo...")
         enviar_y_fijar_bienvenida_grupo()
         with open(bandera, "w") as f:
             f.write(datetime.now().isoformat())
-        logger.info("[SETUP] Bienvenida publicada y fijada.")
+        logger.info("[SETUP] Listo.")
 
-    # Primer ciclo inmediato al arrancar
     logger.info("Ejecutando primer ciclo...")
     ciclo_completo()
 
-    # Activar el schedule
     configurar_schedule()
 
-    logger.info("\nSistema activo. Ctrl+C para detener.\n")
+    logger.info("\nSistema activo.\n")
 
-    # Loop infinito — el sistema corre para siempre
     while True:
         try:
             schedule.run_pending()
             time.sleep(30)
         except KeyboardInterrupt:
-            logger.info("Sistema detenido manualmente.")
+            logger.info("Sistema detenido.")
             break
         except Exception as e:
             logger.error(f"[ERROR loop] {e}")
