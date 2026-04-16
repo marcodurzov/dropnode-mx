@@ -1,6 +1,7 @@
 # =============================================================
-# DROPNODE MX — config.py  (version final)
-# NUNCA compartas este archivo publicamente
+# DROPNODE MX — config.py  (v1.4)
+# Nu y GBM+ activados con links reales
+# NUNCA compartir este archivo publicamente
 # =============================================================
 
 # --- SUPABASE ---
@@ -9,38 +10,33 @@ SUPABASE_KEY = "sb_publishable_IgTaSZpi5MdS6RyPiVWyXw_NybM_w2W"
 
 # --- TELEGRAM ---
 TELEGRAM_TOKEN   = "8608754195:AAGaJNwtnAEh_N15cJOXP-1F0qVp0Yixlps"
-CHANNEL_FREE_ID  = -1003897783132   # Canal publico: DropNode MX
-CHANNEL_VIP_ID   = -1003840453350   # Canal privado: DropNode VIP
-GROUP_ID         = -1003848632862   # Grupo: DropNode Community
+CHANNEL_FREE_ID  = -1003897783132
+CHANNEL_VIP_ID   = -1003840453350
+GROUP_ID         = -1003848632862
 
 # --- AFILIADOS ---
-ML_AFFILIATE_ID = "marcodurzo"       # Tu ID de ML Afiliados
-AMAZON_TAG      = "dropnodemx-20"    # Tu tag de Amazon Associates USA
-
-# --- LAUNCHPASS (cobro VIP) ---
+ML_AFFILIATE_ID = "marcodurzo"
+AMAZON_TAG      = "dropnodemx-20"
 LAUNCHPASS_LINK = "https://www.launchpass.com/marcodurzo/dropnodemxvip"
 
 # --- MODO ARRANQUE EN FRIO ---
-# True = compara vs precio tachado de ML (funciona desde dia 1, menos preciso)
-# False = compara vs minimo historico 90 dias (mas preciso, cambiar despues de 30 dias)
 MODO_FRIO   = True
-UMBRAL_FRIO = 0.35   # 35% de descuento minimo para alertar en modo frio
+UMBRAL_FRIO = 0.35
 
-# --- UMBRALES NORMALES (cuando MODO_FRIO = False) ---
+# --- UMBRALES NORMALES ---
 UMBRAL_DESCUENTO_VIP  = 0.50
 UMBRAL_DESCUENTO_FREE = 0.30
 DIAS_HISTORIAL        = 90
 
-# --- HEAT SCORE (que canal recibe cada alerta) ---
-HEAT_VIP_MIN  = 7    # Score 7-10 -> canal VIP
-HEAT_FREE_MIN = 5    # Score 5-6  -> canal free
-                     # Score 0-4  -> se descarta
+# --- HEAT SCORE ---
+HEAT_VIP_MIN  = 7
+HEAT_FREE_MIN = 5
 
-# --- ANTI-BLOQUEO (tiempo de espera entre peticiones) ---
-DELAY_MIN = 4    # segundos minimo
-DELAY_MAX = 11   # segundos maximo
+# --- ANTI-BLOQUEO ---
+DELAY_MIN = 4
+DELAY_MAX = 11
 
-# --- CATEGORIAS DE MERCADO LIBRE A MONITOREAR ---
+# --- CATEGORIAS ML ---
 CATEGORIAS_ML = [
     {"id": "MLM1051", "nombre": "Celulares",         "emoji": "📱"},
     {"id": "MLM1648", "nombre": "Computacion",        "emoji": "💻"},
@@ -53,31 +49,31 @@ CATEGORIAS_ML = [
 ]
 MAX_ITEMS_POR_CATEGORIA = 48
 
-# --- HORARIO DE OPERACION ---
-HORA_INICIO_ENVIOS = 8    # 8:00 AM - primera alerta del dia
-HORA_FIN_ENVIOS    = 22   # 10:00 PM - ultima alerta del dia
+# --- HORARIO ---
+HORA_INICIO_ENVIOS = 8
+HORA_FIN_ENVIOS    = 22
 
 # --- AUTO-LEARNING ---
 FRECUENCIA_AUTOLEARNING_HORAS = 24
 MIN_ALERTAS_PARA_APRENDER     = 20
 
 # --- PRODUCTOS FINANCIEROS ---
-# Mensajes automaticos en canal free — 2 veces al dia
-# Cuando tengas links de referido de Nu, GBM, Bitso: reemplaza los links
+# Rota automaticamente entre los activos
+# Para agregar Vexi y GBM link real: reemplaza el link cuando lo tengas
 PRODUCTOS_FINANCIEROS = [
     {
         "nombre":      "Plata Card",
-        "descripcion": "Tarjeta sin anualidad + cashback en cada compra",
+        "descripcion": "Tarjeta sin anualidad con cashback en cada compra",
         "beneficio":   "Cada oferta que compres aqui te genera recompensa adicional",
         "link":        "https://platacard.mx/amigos/marco2eeh",
         "emoji":       "💳",
         "activo":      True,
     },
     {
-        "nombre":      "Nu (Nubank MX)",
-        "descripcion": "Tarjeta de credito sin comisiones ni anualidad",
-        "beneficio":   "Sin letra chica. Limite que crece con el uso.",
-        "link":        "https://nu.com.mx",
+        "nombre":      "Nu",
+        "descripcion": "Tarjeta de credito con $0 anualidad y cuenta de debito",
+        "beneficio":   "Tu dinero crece hasta 13% anual en la cuenta Nu",
+        "link":        "https://nu.com.mx/mgm/?channel=referral&id=LNCqQBH3cpk4qn0W56ZAjw&medium=other&msg=06478&source=mgm",
         "emoji":       "💜",
         "activo":      True,
     },
@@ -85,9 +81,17 @@ PRODUCTOS_FINANCIEROS = [
         "nombre":      "GBM+",
         "descripcion": "Invierte el dinero que ahorras con las ofertas",
         "beneficio":   "Rendimiento diario desde $100 MXN, sin comisiones",
-        "link":        "https://gbm.com",
+        "link":        "https://gbm.com",   # <-- Reemplazar con tu link de referido GBM
         "emoji":       "📈",
-        "activo":      True,
+        "activo":      False,  # Activar cuando tengas tu link de referido
+    },
+    {
+        "nombre":      "Vexi",
+        "descripcion": "Tarjeta de credito para construir historial crediticio",
+        "beneficio":   "Aprobacion rapida sin buro. Ideal para empezar tu historial.",
+        "link":        "https://vexi.mx",   # <-- Reemplazar con tu link de referido Vexi
+        "emoji":       "🟦",
+        "activo":      False,  # Activar cuando tengas tu link de referido
     },
     {
         "nombre":      "Bitso",
@@ -95,12 +99,12 @@ PRODUCTOS_FINANCIEROS = [
         "beneficio":   "Util para aprovechar ofertas en tiendas internacionales",
         "link":        "https://bitso.com",
         "emoji":       "₿",
-        "activo":      False,   # Cambiar a True cuando tengas tu link de referido Bitso
+        "activo":      False,  # Activar cuando tengas tu link de referido
     },
 ]
 
-# Horas del dia para mensajes financieros en canal free
-HORAS_MENSAJES_FINANCIEROS = [11, 18]   # 11 AM y 6 PM
+# Horas para mensajes financieros (canal free, VIP y grupo)
+HORAS_MENSAJES_FINANCIEROS = [11, 18]
 
-# Horas del dia para recordatorio VIP en canal free
-HORAS_RECORDATORIO_VIP = [14, 20]       # 2 PM y 8 PM
+# Horas para recordatorio VIP (solo canal free)
+HORAS_RECORDATORIO_VIP = [14, 20]
