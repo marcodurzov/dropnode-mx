@@ -1,6 +1,6 @@
 # =============================================================
-# DROPNODE MX — main.py
-# v1.3 — Agrega moderacion del grupo cada 60 segundos
+# DROPNODE MX — main.py  (v1.4)
+# Fix: verifica mensaje fijado antes de publicar bienvenida
 # =============================================================
 
 import schedule
@@ -21,10 +21,12 @@ from telegram_bot import (
 from auto_learning import ejecutar_autolearning
 from heat_score import interpretar_score
 from config import (
+    TELEGRAM_TOKEN, GROUP_ID,
     FRECUENCIA_AUTOLEARNING_HORAS,
     HORAS_MENSAJES_FINANCIEROS,
     HORAS_RECORDATORIO_VIP,
 )
+import requests
 
 logging.basicConfig(
     level=logging.INFO,
@@ -46,6 +48,27 @@ def resetear_si_nuevo_dia():
         contadores["free"]  = 0
         contadores["fecha"] = hoy
         logger.info("[RESET] Contadores reiniciados")
+
+
+def grupo_ya_tiene_mensaje_fijado() -> bool:
+    """
+    Verifica si el grupo ya tiene al menos un mensaje fijado.
+    Evita publicar el mensaje de bienvenida multiples veces.
+    """
+    try:
+        resp = requests.get(
+            f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/getChat",
+            params={"chat_id": GROUP_ID},
+            timeout=10
+        )
+        data = resp.json()
+        if data.get("ok"):
+            chat = data.get("result", {})
+            # Si existe pinned_message, ya hay un mensaje fijado
+            return "pinned_message" in chat
+    except Exception as e:
+        logger.warning(f"[SETUP] No se pudo verificar mensaje fijado: {e}")
+    return False
 
 
 def ciclo_completo():
@@ -73,21 +96,15 @@ def ciclo_completo():
 
 
 def configurar_schedule():
-    # Scraping y alertas cada 15 minutos
     schedule.every(15).minutes.do(ciclo_completo)
-
-    # Moderacion del grupo cada 60 segundos
     schedule.every(60).seconds.do(revisar_actualizaciones_grupo)
 
-    # Mensajes financieros — 11am y 6pm en todos los canales
     for hora in HORAS_MENSAJES_FINANCIEROS:
         schedule.every().day.at(f"{hora:02d}:00").do(enviar_mensaje_financiero)
 
-    # Recordatorio VIP en canal free — 2pm y 8pm
     for hora in HORAS_RECORDATORIO_VIP:
         schedule.every().day.at(f"{hora:02d}:00").do(enviar_recordatorio_vip)
 
-    # Resumen diario a las 9pm
     schedule.every().day.at("21:00").do(
         lambda: enviar_resumen_diario(
             total_vip=contadores["vip"],
@@ -95,7 +112,6 @@ def configurar_schedule():
         )
     )
 
-    # Auto-learning cada 24 horas
     schedule.every(FRECUENCIA_AUTOLEARNING_HORAS).hours.do(ejecutar_autolearning)
 
     logger.info("Schedule configurado:")
@@ -109,21 +125,19 @@ def configurar_schedule():
 
 if __name__ == "__main__":
     logger.info("\n" + "=" * 50)
-    logger.info("  DROPNODE MX - Sistema v1.3")
+    logger.info("  DROPNODE MX - v1.4")
     logger.info("=" * 50 + "\n")
 
-    # Primera vez: publicar bienvenida en el grupo
-    bandera = "grupo_bienvenida_enviada.txt"
-    if not os.path.exists(bandera):
-        logger.info("[SETUP] Publicando bienvenida en grupo...")
+    # Solo publica bienvenida si el grupo NO tiene ningun mensaje fijado
+    if not grupo_ya_tiene_mensaje_fijado():
+        logger.info("[SETUP] Sin mensaje fijado — publicando bienvenida...")
         enviar_y_fijar_bienvenida_grupo()
-        with open(bandera, "w") as f:
-            f.write(datetime.now().isoformat())
-        logger.info("[SETUP] Listo.")
+        logger.info("[SETUP] Bienvenida publicada y fijada.")
+    else:
+        logger.info("[SETUP] El grupo ya tiene mensaje fijado — omitiendo.")
 
     logger.info("Ejecutando primer ciclo...")
     ciclo_completo()
-
     configurar_schedule()
 
     logger.info("\nSistema activo.\n")
