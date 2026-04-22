@@ -1,12 +1,12 @@
 # =============================================================
-# DROPNODE MX — config.py  (v1.5)
-# GBM+ desactivado — Flink agregado (activar cuando tengas link)
+# DROPNODE MX — config.py  (v1.6)
+# Fix crítico: clave Supabase corregida (formato eyJ)
 # NUNCA compartir este archivo publicamente
 # =============================================================
 
 # --- SUPABASE ---
 SUPABASE_URL = "https://zssrlvchovlcehhlvdfm.supabase.co"
-SUPABASE_KEY = "sb_publishable_IgTaSZpi5MdS6RyPiVWyXw_NybM_w2W"
+SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inpzc3JsdmNob3ZsY2VoaGx2ZGZtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzU1MzkzMzAsImV4cCI6MjA5MTExNTMzMH0.-MPnRXkAiepKchuPlMwN17RsKhhUPHFBj2qNgHw3Dfw"
 
 # --- TELEGRAM ---
 TELEGRAM_TOKEN   = "8608754195:AAGaJNwtnAEh_N15cJOXP-1F0qVp0Yixlps"
@@ -58,14 +58,6 @@ FRECUENCIA_AUTOLEARNING_HORAS = 24
 MIN_ALERTAS_PARA_APRENDER     = 20
 
 # --- PRODUCTOS FINANCIEROS ---
-# activo: True  = el mensaje se publica automaticamente
-# activo: False = en pausa, no se publica hasta que lo actives
-#
-# Para activar GBM, Vexi, Flink o Bitso:
-#   1. Consigue tu link de referido personal de esa app
-#   2. Reemplaza el link de placeholder
-#   3. Cambia activo: False  a  activo: True
-#   4. Sube el archivo a GitHub — listo
 PRODUCTOS_FINANCIEROS = [
     {
         "nombre":      "Plata Card",
@@ -87,38 +79,35 @@ PRODUCTOS_FINANCIEROS = [
         "nombre":      "Flink",
         "descripcion": "Invierte desde $1 MXN con rendimientos diarios",
         "beneficio":   "Haz crecer el dinero que ahorras con cada oferta",
-        "link":        "https://flink.com.mx",  # Reemplazar con tu link de referido Flink
+        "link":        "https://flink.com.mx",
         "emoji":       "📊",
-        "activo":      False,  # Activar cuando tengas tu link de referido
+        "activo":      False,
     },
     {
         "nombre":      "Vexi",
         "descripcion": "Tarjeta de credito para construir historial crediticio",
         "beneficio":   "Aprobacion rapida sin buro. Ideal para empezar tu historial.",
-        "link":        "https://vexi.mx",       # Reemplazar con tu link de referido Vexi
+        "link":        "https://vexi.mx",
         "emoji":       "🟦",
-        "activo":      False,  # Activar cuando tengas tu link de referido
+        "activo":      False,
     },
     {
         "nombre":      "GBM+",
         "descripcion": "Plataforma de inversion en Mexico",
         "beneficio":   "Acceso a la bolsa mexicana y americana desde tu celular",
-        "link":        "https://gbm.com",       # Reemplazar con link de referido si activan programa
+        "link":        "https://gbm.com",
         "emoji":       "📈",
-        "activo":      False,  # Sin programa de referidos activo por el momento
+        "activo":      False,
     },
     {
         "nombre":      "Bitso",
         "descripcion": "Compra dolares desde tu celular al mejor tipo de cambio",
         "beneficio":   "Util para aprovechar ofertas en tiendas internacionales",
-        "link":        "https://bitso.com",     # Reemplazar con tu link de referido Bitso
+        "link":        "https://bitso.com",
         "emoji":       "₿",
-        "activo":      False,  # Activar cuando tengas tu link de referido
+        "activo":      False,
     },
 ]
 
-# Horas para mensajes financieros
 HORAS_MENSAJES_FINANCIEROS = [11, 18]
-
-# Horas para recordatorio VIP en canal free
-HORAS_RECORDATORIO_VIP = [14, 20]
+HORAS_RECORDATORIO_VIP     = [14, 20]
