@@ -1,7 +1,7 @@
 # DROPNODE MX — Dependencias del sistema
 # Instalar con: pip install -r requirements.txt
 
-supabase==2.3.4
+supabase==1.2.0
 requests==2.31.0
 schedule==1.2.2
 python-dotenv==1.0.1
