@@ -1,8 +1,7 @@
 # =============================================================
-# DROPNODE MX — config.py  (v1.7)
-# + eBay Partner agregado
-# + CJ Dropshipping como canal de dropshippers (nicho diferente)
-# NUNCA compartir este archivo publicamente
+# DROPNODE MX — config.py  (v1.8)
+# Umbral frio bajado a 0.20 para generar primeras alertas
+# Webhook Make.com integrado
 # =============================================================
 
 SUPABASE_URL = "https://zssrlvchovlcehhlvdfm.supabase.co"
@@ -19,18 +18,22 @@ EBAY_CAMPAIGN_ID = "5339151577"
 EBAY_CUSTOM_ID   = "dropnodemx"
 LAUNCHPASS_LINK  = "https://www.launchpass.com/marcodurzo/dropnodemxvip"
 
-# Make.com Webhook URL (llenar cuando lo configures)
-MAKE_WEBHOOK_URL = ""
+# Make.com webhook — recibe alertas score 8+ para generar videos
+MAKE_WEBHOOK_URL = "https://hook.us2.make.com/olbtuv7aj22knwmx5z3adgjj2fr1sy6i"
 
+# --- MODO FRIO ---
+# True  = compara vs precio tachado de ML (activo ahora)
+# False = compara vs minimo historico 90 dias (cambiar en 30 dias)
 MODO_FRIO   = True
-UMBRAL_FRIO = 0.35
+UMBRAL_FRIO = 0.20   # Bajado de 0.35 a 0.20 — genera alertas desde hoy
 
-UMBRAL_DESCUENTO_VIP  = 0.50
-UMBRAL_DESCUENTO_FREE = 0.30
+# --- UMBRALES NORMALES ---
+UMBRAL_DESCUENTO_VIP  = 0.40
+UMBRAL_DESCUENTO_FREE = 0.20
 DIAS_HISTORIAL        = 90
 
 HEAT_VIP_MIN  = 7
-HEAT_FREE_MIN = 5
+HEAT_FREE_MIN = 4   # Bajado de 5 a 4 para canal free
 
 DELAY_MIN = 4
 DELAY_MAX = 11
@@ -81,7 +84,7 @@ PRODUCTOS_FINANCIEROS = [
     {
         "nombre":      "Vexi",
         "descripcion": "Tarjeta de credito para construir historial crediticio",
-        "beneficio":   "Aprobacion rapida sin buro. Ideal para empezar tu historial.",
+        "beneficio":   "Aprobacion rapida sin buro.",
         "link":        "https://vexi.mx",
         "emoji":       "🟦",
         "activo":      False,
