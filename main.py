@@ -1,6 +1,7 @@
 # =============================================================
-# DROPNODE MX — main.py  (v1.4)
-# Fix: verifica mensaje fijado antes de publicar bienvenida
+# DROPNODE MX — main.py  (v1.8)
+# + Webhook Make.com para videos automaticos
+# + Umbral reducido para primeras alertas reales
 # =============================================================
 
 import schedule
@@ -8,6 +9,7 @@ import time
 import logging
 import sys
 import os
+import requests as req
 from datetime import datetime
 from scraper_ml import ejecutar_ciclo
 from telegram_bot import (
@@ -25,8 +27,8 @@ from config import (
     FRECUENCIA_AUTOLEARNING_HORAS,
     HORAS_MENSAJES_FINANCIEROS,
     HORAS_RECORDATORIO_VIP,
+    MAKE_WEBHOOK_URL,
 )
-import requests
 
 logging.basicConfig(
     level=logging.INFO,
@@ -47,27 +49,52 @@ def resetear_si_nuevo_dia():
         contadores["vip"]   = 0
         contadores["free"]  = 0
         contadores["fecha"] = hoy
-        logger.info("[RESET] Contadores reiniciados")
+
+
+def notificar_make_webhook(alerta: dict):
+    """
+    Envia los datos de la alerta a Make.com para generar el video.
+    Solo se llama para alertas score 8+ (VIP).
+    """
+    if not MAKE_WEBHOOK_URL:
+        return
+
+    descuento_pct = round(alerta["descuento_real"] * 100)
+
+    payload = {
+        "nombre":       alerta["nombre"][:80],
+        "precio":       str(round(alerta["precio_actual"])),
+        "descuento":    str(descuento_pct),
+        "thumbnail":    alerta.get("thumbnail", ""),
+        "link":         alerta["permalink"],
+        "categoria":    alerta["categoria"]["nombre"],
+        "heat_score":   alerta["heat_score"],
+        "tienda":       "Mercado Libre",
+        "timestamp":    datetime.now().isoformat(),
+    }
+
+    try:
+        resp = req.post(MAKE_WEBHOOK_URL, json=payload, timeout=10)
+        if resp.status_code == 200:
+            logger.info(f"[MAKE] Webhook enviado — {alerta['nombre'][:40]}")
+        else:
+            logger.warning(f"[MAKE] Webhook error {resp.status_code}")
+    except Exception as e:
+        logger.warning(f"[MAKE] Webhook exception: {e}")
 
 
 def grupo_ya_tiene_mensaje_fijado() -> bool:
-    """
-    Verifica si el grupo ya tiene al menos un mensaje fijado.
-    Evita publicar el mensaje de bienvenida multiples veces.
-    """
     try:
-        resp = requests.get(
+        resp = req.get(
             f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/getChat",
             params={"chat_id": GROUP_ID},
             timeout=10
         )
         data = resp.json()
         if data.get("ok"):
-            chat = data.get("result", {})
-            # Si existe pinned_message, ya hay un mensaje fijado
-            return "pinned_message" in chat
-    except Exception as e:
-        logger.warning(f"[SETUP] No se pudo verificar mensaje fijado: {e}")
+            return "pinned_message" in data.get("result", {})
+    except Exception:
+        pass
     return False
 
 
@@ -80,13 +107,19 @@ def ciclo_completo():
             interp = interpretar_score(alerta["heat_score"])
             if interp["canal"] == "descartar":
                 continue
+
             exito = enviar_alerta(alerta)
+
             if exito:
                 if interp["canal"] == "vip":
                     contadores["vip"] += 1
+                    # Notificar Make.com para generar video
+                    if alerta["heat_score"] >= 8:
+                        notificar_make_webhook(alerta)
                 else:
                     contadores["free"] += 1
                 time.sleep(6)
+
         logger.info(
             f"[CICLO] Fin - VIP:{contadores['vip']} "
             f"Free:{contadores['free']}"
@@ -111,30 +144,20 @@ def configurar_schedule():
             total_free=contadores["free"]
         )
     )
-
     schedule.every(FRECUENCIA_AUTOLEARNING_HORAS).hours.do(ejecutar_autolearning)
 
-    logger.info("Schedule configurado:")
-    logger.info("  Scraping:          cada 15 min")
-    logger.info("  Moderacion grupo:  cada 60 seg")
-    logger.info(f"  Financieros:       {HORAS_MENSAJES_FINANCIEROS}h")
-    logger.info(f"  Recordatorio VIP:  {HORAS_RECORDATORIO_VIP}h")
-    logger.info("  Resumen diario:    21:00h")
-    logger.info(f"  Auto-learning:     cada {FRECUENCIA_AUTOLEARNING_HORAS}h")
+    logger.info("Schedule activo: scraping 15min | financieros %s | VIP CTA %s | resumen 21h",
+                HORAS_MENSAJES_FINANCIEROS, HORAS_RECORDATORIO_VIP)
 
 
 if __name__ == "__main__":
     logger.info("\n" + "=" * 50)
-    logger.info("  DROPNODE MX - v1.4")
+    logger.info("  DROPNODE MX - v1.8")
     logger.info("=" * 50 + "\n")
 
-    # Solo publica bienvenida si el grupo NO tiene ningun mensaje fijado
     if not grupo_ya_tiene_mensaje_fijado():
-        logger.info("[SETUP] Sin mensaje fijado — publicando bienvenida...")
+        logger.info("[SETUP] Publicando bienvenida en grupo...")
         enviar_y_fijar_bienvenida_grupo()
-        logger.info("[SETUP] Bienvenida publicada y fijada.")
-    else:
-        logger.info("[SETUP] El grupo ya tiene mensaje fijado — omitiendo.")
 
     logger.info("Ejecutando primer ciclo...")
     ciclo_completo()
