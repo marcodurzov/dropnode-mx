@@ -1,8 +1,11 @@
 # =============================================================
-# DROPNODE MX — config.py  (v1.8)
-# Umbral frio bajado a 0.20 para generar primeras alertas
-# Webhook Make.com integrado
+# DROPNODE MX — config.py  (v1.9)
+# + Timezone Mexico City (UTC-6)
+# + Umbrales ajustados para generar contenido diario
+# + Multiples tiendas activadas
 # =============================================================
+
+import os
 
 SUPABASE_URL = "https://zssrlvchovlcehhlvdfm.supabase.co"
 SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inpzc3JsdmNob3ZsY2VoaGx2ZGZtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzU1MzkzMzAsImV4cCI6MjA5MTExNTMzMH0.-MPnRXkAiepKchuPlMwN17RsKhhUPHFBj2qNgHw3Dfw"
@@ -17,27 +20,42 @@ AMAZON_TAG       = "dropnodemx-20"
 EBAY_CAMPAIGN_ID = "5339151577"
 EBAY_CUSTOM_ID   = "dropnodemx"
 LAUNCHPASS_LINK  = "https://www.launchpass.com/marcodurzo/dropnodemxvip"
-
-# Make.com webhook — recibe alertas score 8+ para generar videos
 MAKE_WEBHOOK_URL = "https://hook.us2.make.com/olbtuv7aj22knwmx5z3adgjj2fr1sy6i"
 
-# --- MODO FRIO ---
-# True  = compara vs precio tachado de ML (activo ahora)
-# False = compara vs minimo historico 90 dias (cambiar en 30 dias)
-MODO_FRIO   = True
-UMBRAL_FRIO = 0.20   # Bajado de 0.35 a 0.20 — genera alertas desde hoy
+# --- TIMEZONE ---
+# Mexico City / Guadalajara / Monterrey — UTC-6 (sin horario de verano desde 2023)
+TIMEZONE_OFFSET_HOURS = -6
 
-# --- UMBRALES NORMALES ---
-UMBRAL_DESCUENTO_VIP  = 0.40
-UMBRAL_DESCUENTO_FREE = 0.20
+# --- UMBRALES ---
+MODO_FRIO   = True
+UMBRAL_FRIO = 0.15   # 15% — genera contenido diario garantizado
+
+# Umbral separado por canal
+UMBRAL_VIP  = 0.30   # 30%+ va al VIP (exclusivo)
+UMBRAL_FREE = 0.15   # 15%+ va al free
+
+UMBRAL_DESCUENTO_VIP  = 0.30
+UMBRAL_DESCUENTO_FREE = 0.15
 DIAS_HISTORIAL        = 90
 
-HEAT_VIP_MIN  = 7
-HEAT_FREE_MIN = 4   # Bajado de 5 a 4 para canal free
+HEAT_VIP_MIN  = 6
+HEAT_FREE_MIN = 3
 
+# --- ANTI-BLOQUEO ---
 DELAY_MIN = 4
 DELAY_MAX = 11
 
+# --- TIENDAS A MONITOREAR ---
+# Con afiliado: ML, Amazon, eBay
+# Sin afiliado pero con contenido de valor: Walmart, Coppel, Liverpool
+TIENDAS_ACTIVAS = {
+    "mercadolibre": True,
+    "walmart":      True,
+    "coppel":       True,
+    "liverpool":    True,   # Scraping directo, sin afiliado por ahora
+}
+
+# --- CATEGORIAS ML ---
 CATEGORIAS_ML = [
     {"id": "MLM1051", "nombre": "Celulares",         "emoji": "📱"},
     {"id": "MLM1648", "nombre": "Computacion",        "emoji": "💻"},
@@ -50,12 +68,15 @@ CATEGORIAS_ML = [
 ]
 MAX_ITEMS_POR_CATEGORIA = 48
 
-HORA_INICIO_ENVIOS = 8
-HORA_FIN_ENVIOS    = 22
+# --- HORARIO (hora local Mexico City) ---
+# El sistema convierte automaticamente de UTC a hora Mexico
+HORA_INICIO_ENVIOS = 8    # 8:00 AM hora Mexico
+HORA_FIN_ENVIOS    = 22   # 10:00 PM hora Mexico
 
 FRECUENCIA_AUTOLEARNING_HORAS = 24
 MIN_ALERTAS_PARA_APRENDER     = 20
 
+# --- PRODUCTOS FINANCIEROS ---
 PRODUCTOS_FINANCIEROS = [
     {
         "nombre":      "Plata Card",
@@ -91,5 +112,7 @@ PRODUCTOS_FINANCIEROS = [
     },
 ]
 
+# Horarios en hora Mexico City
 HORAS_MENSAJES_FINANCIEROS = [11, 18]
 HORAS_RECORDATORIO_VIP     = [14, 20]
+HORA_RESUMEN_DIARIO        = 21
