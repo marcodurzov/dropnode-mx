@@ -23,6 +23,7 @@ from telegram_bot import (
     publicar_mejores_del_dia,
 )
 from auto_learning import ejecutar_autolearning
+from community_manager import ejecutar_community_manager
 from heat_score    import calcular_heat_score
 from config import (
     TELEGRAM_TOKEN, GROUP_ID, CHANNEL_FREE_ID, CHANNEL_VIP_ID,
@@ -144,6 +145,7 @@ def configurar():
         lambda: enviar_resumen_diario(contadores["vip"], contadores["free"]))
     schedule.every().day.at("15:00").do(reporte_vip_semanal)
     schedule.every(FRECUENCIA_AUTOLEARNING_HORAS).hours.do(ejecutar_autolearning)
+    schedule.every().hour.do(ejecutar_community_manager)
     logger.info("Railway: Walmart|Liverpool|Coppel|Amazon|AliExpress|SHEIN")
     logger.info("ML scraping: GitHub Actions (cada 30 min)")
 
