@@ -1,172 +1,301 @@
 # =============================================================
-# DROPNODE MX — telegram_bot.py
-# v1.3 — Sin caracteres especiales en mensajes
-#       + Plata Card en todos los canales
-#       + Moderacion automatica del grupo Community
+# DROPNODE MX — telegram_bot.py  v2.1
+# Mensajes con contexto histórico + urgencia + prueba social
 # =============================================================
 
-import requests
-import logging
-import urllib.parse
-import time
-from datetime import datetime
+import requests, logging, urllib.parse, time, random
+from datetime import datetime, timezone, timedelta
 from config import (
     TELEGRAM_TOKEN, CHANNEL_FREE_ID, CHANNEL_VIP_ID, GROUP_ID,
-    ML_AFFILIATE_ID, AMAZON_TAG, LAUNCHPASS_LINK,
-    HORA_INICIO_ENVIOS, HORA_FIN_ENVIOS,
-    PRODUCTOS_FINANCIEROS
+    ML_AFFILIATE_ID, AMAZON_TAG, EBAY_CAMPAIGN_ID, EBAY_CUSTOM_ID,
+    LAUNCHPASS_LINK, HORA_INICIO_ENVIOS, HORA_FIN_ENVIOS,
+    PRODUCTOS_FINANCIEROS, TIMEZONE_OFFSET_HOURS,
 )
 from heat_score import interpretar_score
-from database import guardar_alerta
+from database  import guardar_alerta, get_stats_historicas, get_engagement_producto
 
 logger       = logging.getLogger(__name__)
 TELEGRAM_API = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}"
+TZ_MEXICO    = timezone(timedelta(hours=TIMEZONE_OFFSET_HOURS))
 
-# ─────────────────────────────────────────────
-#  REGISTRO DE ADVERTENCIAS (en memoria)
-#  Formato: { user_id: cantidad_de_advertencias }
-#  Se reinicia cuando el bot se reinicia.
-#  Para persistencia futura: mover a Supabase.
-# ─────────────────────────────────────────────
-advertencias = {}
-
-# Links que el bot considera spam en el grupo
-DOMINIOS_SPAM = [
-    "t.me/",       # Links a otros canales de Telegram
-    "whatsapp.com",
-    "bit.ly",
-    "tinyurl",
-    "shorturl",
-]
-
-# Dominios permitidos aunque sean links
-DOMINIOS_PERMITIDOS = [
-    "mercadolibre",
-    "amazon",
-    "liverpool",
-    "walmart",
-    "coppel",
-    "launchpass.com/marcodurzo",
-    "platacard.mx",
-]
-
-
-# ─────────────────────────────────────────────
-#  HORARIO
-# ─────────────────────────────────────────────
+def hora_mx():
+    return datetime.now(TZ_MEXICO)
 
 def dentro_de_horario():
-    hora = datetime.now().hour
-    return HORA_INICIO_ENVIOS <= hora < HORA_FIN_ENVIOS
+    return HORA_INICIO_ENVIOS <= hora_mx().hour < HORA_FIN_ENVIOS
 
 
 # ─────────────────────────────────────────────
-#  LINKS DE AFILIADO
+#  AFILIADOS
 # ─────────────────────────────────────────────
 
-def link_afiliado_ml(url, item_id):
+def link_ml(url, item_id):
     if not ML_AFFILIATE_ID:
         return url
-    params = urllib.parse.urlencode({
-        "as_src":       "affiliate",
-        "as_campaign":  "dropnodemx",
-        "as_content":   item_id,
-        "url":          url,
-        "affiliate_id": ML_AFFILIATE_ID,
+    p = urllib.parse.urlencode({
+        "as_src": "affiliate", "as_campaign": "dropnodemx",
+        "as_content": item_id, "url": url, "affiliate_id": ML_AFFILIATE_ID,
     })
-    return f"https://go.mercadolibre.com.mx?{params}"
+    return f"https://go.mercadolibre.com.mx?{p}"
 
-
-def link_afiliado_amazon(url):
+def link_amazon(url):
     if not AMAZON_TAG:
         return url
     sep = "&" if "?" in url else "?"
     return f"{url}{sep}tag={AMAZON_TAG}"
 
-
-def link_afiliado_auto(url, item_id=""):
-    if "mercadolibre" in url:
-        return link_afiliado_ml(url, item_id)
-    elif "amazon.com.mx" in url or "amazon.mx" in url:
-        return link_afiliado_amazon(url)
+def link_auto(url, item_id=""):
+    if "mercadolibre" in url: return link_ml(url, item_id)
+    if "amazon.com.mx" in url or "amazon.mx" in url: return link_amazon(url)
     return url
 
 
 # ─────────────────────────────────────────────
-#  FORMATO DE ALERTAS
+#  CONTEXTO HISTORICO (el diferenciador real)
 # ─────────────────────────────────────────────
 
-def formatear_mensaje_vip(alerta):
+def construir_contexto_historico(producto_id: str,
+                                  precio_actual: float) -> dict:
+    """
+    Trae estadísticas reales de Supabase y las convierte
+    en frases de urgencia y contexto para el mensaje.
+    """
+    stats = get_stats_historicas(producto_id)
+    ctx   = {}
+
+    if not stats:
+        return ctx
+
+    min_p   = stats.get("precio_minimo", precio_actual)
+    max_p   = stats.get("precio_maximo", precio_actual)
+    avg_p   = stats.get("precio_promedio", precio_actual)
+    dias_h  = stats.get("dias_historial", 0)
+    dias_act = stats.get("dias_en_precio_actual", 0)
+
+    # ¿Es el precio más bajo registrado?
+    if precio_actual <= min_p * 1.01 and dias_h >= 7:
+        ctx["es_minimo"] = True
+        ctx["frase_minimo"] = (
+            f"Precio mas bajo en {dias_h} dias de seguimiento"
+        )
+
+    # Diferencia vs promedio
+    if avg_p > 0 and precio_actual < avg_p * 0.90:
+        ahorro_vs_promedio = avg_p - precio_actual
+        ctx["vs_promedio"] = (
+            f"${ahorro_vs_promedio:,.0f} menos que el precio promedio"
+        )
+
+    # Diferencia vs máximo histórico
+    if max_p > precio_actual * 1.20:
+        ctx["vs_maximo"] = (
+            f"Llego a costar ${max_p:,.0f} MXN hace {dias_h} dias"
+        )
+
+    # Cuánto tiempo lleva en este precio
+    if dias_act >= 2:
+        ctx["tiempo_precio"] = f"En este precio hace {dias_act} dias"
+    elif dias_act == 0:
+        ctx["tiempo_precio"] = "Precio cambiado hoy"
+
+    return ctx
+
+
+def construir_prueba_social(producto_id: str,
+                             stock: int) -> dict:
+    """
+    Genera frases de prueba social basadas en datos reales:
+    - Engagement del producto en el canal
+    - Stock actual (urgencia real)
+    - Actividad reciente
+    """
+    eng  = get_engagement_producto(producto_id)
+    ps   = {}
+
+    # Urgencia por stock real
+    if stock == 1:
+        ps["stock"] = "ULTIMA UNIDAD disponible"
+    elif stock <= 3:
+        ps["stock"] = f"Solo {stock} unidades en existencia"
+    elif stock <= 5:
+        ps["stock"] = f"{stock} unidades disponibles"
+    elif stock <= 10:
+        ps["stock"] = f"{stock} unidades — stock bajo"
+
+    # Engagement real del canal
+    clicks = eng.get("total_clicks", 0)
+    if clicks >= 10:
+        ps["clicks"] = f"{clicks} personas del canal vieron esta oferta"
+    elif clicks >= 3:
+        ps["clicks"] = f"{clicks} personas del canal revisaron este producto"
+
+    # Cuántas veces se ha alertado este producto
+    alertas = eng.get("total_alertas", 0)
+    if alertas >= 3:
+        ps["recurrente"] = f"Alerta enviada {alertas} veces — precio vuelve a caer"
+
+    return ps
+
+
+def estimar_ventana_oferta(descuento: float, stock: int) -> str:
+    """
+    Estima cuánto tiempo podría durar la oferta.
+    Basado en patrones reales de ML y otras tiendas.
+    Legal porque es una estimación declarada como tal.
+    """
+    if descuento >= 0.50 or stock <= 2:
+        return "Oferta podria terminar en minutos"
+    elif descuento >= 0.35 or stock <= 5:
+        return "Disponible probablemente pocas horas"
+    elif descuento >= 0.25:
+        return "Oferta de tiempo limitado"
+    else:
+        return ""
+
+
+# ─────────────────────────────────────────────
+#  FORMATOS DE MENSAJES
+# ─────────────────────────────────────────────
+
+def formatear_vip(alerta: dict) -> str:
     interp     = interpretar_score(alerta["heat_score"])
-    nombre     = alerta["nombre"][:60]
+    nombre     = alerta["nombre"][:65]
     p_act      = alerta["precio_actual"]
     p_ref      = alerta["precio_minimo"]
+    p_orig     = alerta["precio_original"]
     descuento  = alerta["descuento_real"] * 100
     stock      = alerta["stock"]
-    emoji_cat  = alerta["categoria"]["emoji"]
-    nombre_cat = alerta["categoria"]["nombre"]
-    link       = link_afiliado_auto(alerta["permalink"], alerta["item_id"])
+    emoji_c    = alerta["categoria"]["emoji"]
+    cat_nombre = alerta["categoria"]["nombre"]
+    link       = link_auto(alerta["permalink"], alerta["item_id"])
     score      = alerta["heat_score"]
     es_frio    = alerta.get("modo_frio", False)
-    ref_label  = "Precio tachado" if es_frio else "Minimo historico"
 
-    if stock == 1:
-        stock_txt = "ULTIMA UNIDAD"
-    elif stock <= 3:
-        stock_txt = f"Solo {stock} unidades"
-    elif stock <= 10:
-        stock_txt = f"{stock} unidades disponibles"
-    else:
-        stock_txt = "Stock disponible"
+    ctx = construir_contexto_historico(alerta["producto_id"], p_act)
+    ps  = construir_prueba_social(alerta["producto_id"], stock)
+    ventana = estimar_ventana_oferta(alerta["descuento_real"], stock)
 
-    reventa_low  = p_ref * 0.80
-    reventa_high = p_ref * 0.92
+    rl = p_ref * 0.80
+    rh = p_ref * 0.92
 
-    return (
-        f"{interp['emoji']} *{interp['etiqueta']}*"
-        f" - {emoji_cat} {nombre_cat}\n\n"
-        f"*{nombre}*\n\n"
-        f"Precio ahora: *${p_act:,.0f} MXN*\n"
-        f"{ref_label}: ${p_ref:,.0f} MXN\n"
-        f"Caida real: *-{descuento:.0f}%*\n"
-        f"Stock: {stock_txt}\n"
-        f"Score: {score}/10\n\n"
-        f"[COMPRAR AHORA]({link})\n\n"
-        f"_Reventa estimada: ${reventa_low:,.0f} - ${reventa_high:,.0f} MXN_\n"
-        f"_{datetime.now().strftime('%H:%M:%S')}_"
-    )
+    # Linea de precio de referencia
+    ref_label = "Precio tachado" if es_frio else "Minimo historico"
+
+    msg = f"{interp['emoji']} *{interp['etiqueta']}*  {emoji_c} {cat_nombre}\n\n"
+    msg += f"*{nombre}*\n\n"
+
+    # Bloque de precio
+    msg += f"Precio ahora:   *${p_act:,.0f} MXN*\n"
+    msg += f"{ref_label}:  ${p_ref:,.0f} MXN\n"
+    msg += f"Descuento real: *-{descuento:.0f}%*\n"
+
+    # Contexto histórico
+    if ctx.get("es_minimo"):
+        msg += f"\n*{ctx['frase_minimo']}*\n"
+    if ctx.get("vs_promedio"):
+        msg += f"{ctx['vs_promedio']}\n"
+    if ctx.get("vs_maximo"):
+        msg += f"{ctx['vs_maximo']}\n"
+
+    # Stock y urgencia
+    msg += "\n"
+    if ps.get("stock"):
+        msg += f"*{ps['stock']}*\n"
+    if ventana:
+        msg += f"_{ventana}_\n"
+
+    # Prueba social real
+    if ps.get("clicks"):
+        msg += f"_{ps['clicks']}_\n"
+    if ps.get("recurrente"):
+        msg += f"_{ps['recurrente']}_\n"
+
+    msg += f"\nScore: {score}/10\n\n"
+    msg += f"[COMPRAR AHORA]({link})\n\n"
+    msg += f"_Reventa estimada: ${rl:,.0f} - ${rh:,.0f} MXN_\n"
+    msg += f"_{hora_mx().strftime('%H:%M:%S')} hora MX_"
+
+    return msg
 
 
-def formatear_mensaje_free(alerta):
+def formatear_free(alerta: dict) -> str:
     interp    = interpretar_score(alerta["heat_score"])
     nombre    = alerta["nombre"][:60]
     p_act     = alerta["precio_actual"]
     p_ref     = alerta["precio_minimo"]
     descuento = alerta["descuento_real"] * 100
-    emoji_cat = alerta["categoria"]["emoji"]
-    link      = link_afiliado_auto(alerta["permalink"], alerta["item_id"])
+    emoji_c   = alerta["categoria"]["emoji"]
+    link      = link_auto(alerta["permalink"], alerta["item_id"])
+    stock     = alerta["stock"]
 
-    return (
-        f"{interp['emoji']} *{interp['etiqueta']}* {emoji_cat}\n\n"
-        f"{nombre}\n\n"
-        f"*${p_act:,.0f} MXN* (-{descuento:.0f}%)\n"
-        f"Ref: ${p_ref:,.0f} MXN\n\n"
-        f"[Ver oferta]({link})\n\n"
-        f"_Canal VIP recibe estas alertas primero._\n"
-        f"_{LAUNCHPASS_LINK}_"
-    )
+    ctx = construir_contexto_historico(alerta["producto_id"], p_act)
+    ps  = construir_prueba_social(alerta["producto_id"], stock)
+
+    msg = f"{interp['emoji']} *{interp['etiqueta']}*  {emoji_c}\n\n"
+    msg += f"*{nombre}*\n\n"
+    msg += f"*${p_act:,.0f} MXN* (-{descuento:.0f}%)\n"
+    msg += f"Ref: ${p_ref:,.0f} MXN\n"
+
+    if ctx.get("es_minimo"):
+        msg += f"\n*{ctx['frase_minimo']}*\n"
+    if ps.get("stock"):
+        msg += f"*{ps['stock']}*\n"
+    if ps.get("clicks"):
+        msg += f"_{ps['clicks']}_\n"
+
+    msg += f"\n[Ver oferta]({link})\n\n"
+    msg += f"_El canal VIP recibe estas alertas primero + analisis de reventa._\n"
+    msg += f"_{LAUNCHPASS_LINK}_"
+
+    return msg
+
+
+def formatear_mejor_del_dia(alertas: list) -> str:
+    """
+    Resumen de los mejores productos del ciclo.
+    Con contexto histórico cuando está disponible.
+    """
+    if not alertas:
+        return ""
+
+    hora = hora_mx()
+    titulo = "Mejores precios de la tarde" if hora.hour >= 15 else "Mejores precios de la manana"
+
+    msg = f"📋 *{titulo} — DropNode MX*\n\n"
+    msg += "_Nuestro equipo reviso miles de productos. Estos destacan hoy:_\n\n"
+
+    for i, item in enumerate(alertas[:5], 1):
+        nombre  = item["nombre"][:50]
+        precio  = item["precio_actual"]
+        emoji   = item["categoria"]["emoji"]
+        link    = item.get("permalink", "")
+        desc    = item.get("descuento_real", 0) * 100
+
+        ctx = construir_contexto_historico(
+            item.get("producto_id", ""), precio)
+
+        linea = f"{i}. {emoji} *[{nombre}]({link})*\n"
+        linea += f"   *${precio:,.0f} MXN*"
+        if desc >= 10:
+            linea += f" (-{desc:.0f}%)"
+        if ctx.get("es_minimo"):
+            linea += f"\n   _{ctx['frase_minimo']}_"
+        msg += linea + "\n\n"
+
+    msg += f"🔒 _Alertas de errores de precio van al VIP primero._\n"
+    msg += f"_{LAUNCHPASS_LINK}_"
+    return msg
 
 
 # ─────────────────────────────────────────────
-#  MENSAJES PERIODICOS — FINANCIEROS
+#  MENSAJES PERIODICOS
 # ─────────────────────────────────────────────
 
 def formatear_financiero_free():
-    """Mensaje completo de producto financiero para canal free."""
     activos = [p for p in PRODUCTOS_FINANCIEROS if p["activo"]]
     if not activos:
         return None
-    prod = activos[datetime.now().day % len(activos)]
+    prod = activos[hora_mx().day % len(activos)]
     return (
         f"{prod['emoji']} *{prod['nombre']}*\n\n"
         f"{prod['descripcion']}\n\n"
@@ -175,82 +304,51 @@ def formatear_financiero_free():
         f"_Recomendado por DropNode MX._"
     )
 
-
 def formatear_financiero_vip():
-    """Version corta para canal VIP — sin parecer publicidad."""
     activos = [p for p in PRODUCTOS_FINANCIEROS if p["activo"]]
     if not activos:
         return None
-    prod = activos[datetime.now().day % len(activos)]
-    return (
-        f"{prod['emoji']} *{prod['nombre']}* "
-        f"- {prod['descripcion']}\n"
-        f"[Ver]({prod['link']})"
-    )
-
-
-def formatear_financiero_grupo():
-    """Version para el grupo Community — mas espaciada, menos frecuente."""
-    activos = [p for p in PRODUCTOS_FINANCIEROS if p["activo"]]
-    if not activos:
-        return None
-    # En el grupo rota diferente para no coincidir con el canal free
-    prod = activos[(datetime.now().day + 1) % len(activos)]
-    return (
-        f"{prod['emoji']} *Tip financiero del equipo DropNode*\n\n"
-        f"*{prod['nombre']}* - {prod['descripcion']}\n\n"
-        f"{prod['beneficio']}\n\n"
-        f"[Mas informacion]({prod['link']})"
-    )
-
-
-# ─────────────────────────────────────────────
-#  RECORDATORIO VIP
-# ─────────────────────────────────────────────
+    prod = activos[hora_mx().day % len(activos)]
+    return f"{prod['emoji']} *{prod['nombre']}* — {prod['descripcion']}\n[Ver]({prod['link']})"
 
 def formatear_recordatorio_vip():
     versiones = [
         (
-            "Canal VIP DropNode MX\n\n"
-            "Las alertas de errores de precio llegan ahi primero.\n"
-            "Un solo error de precio bien aprovechado paga meses de acceso.\n\n"
-            f"{LAUNCHPASS_LINK}"
+            "*Canal VIP DropNode MX*\n\n"
+            "Errores de precio - Analisis de reventa - Stock critico\n"
+            "Todo antes que el canal publico.\n\n"
+            f"$299 MXN/mes - cancela cuando quieras\n{LAUNCHPASS_LINK}"
         ),
         (
-            "Mientras lees esto...\n\n"
-            "En el canal VIP ya hay alertas de stock critico.\n"
+            "*Mientras lees esto...*\n\n"
+            "Los miembros VIP ya recibieron alertas con analisis completo.\n"
             "Las mejores oportunidades no esperan.\n\n"
             f"{LAUNCHPASS_LINK}"
         ),
         (
-            "*Canal VIP DropNode MX*\n\n"
-            "Errores de precio - Stock limitado - Liquidaciones\n"
-            "Todo antes que este canal.\n\n"
-            f"$299 MXN/mes - cancela cuando quieras\n"
-            f"{LAUNCHPASS_LINK}"
+            "*Canal VIP — lo que incluye:*\n\n"
+            "Alertas en tiempo real\n"
+            "Precio vs historico de 90 dias\n"
+            "Estimacion de reventa\n"
+            "Alertas de stock critico\n"
+            "Reporte semanal exclusivo\n\n"
+            f"$299 MXN/mes\n{LAUNCHPASS_LINK}"
         ),
     ]
-    idx = (datetime.now().day + datetime.now().hour) % len(versiones)
+    idx = (hora_mx().day + hora_mx().hour) % len(versiones)
     return versiones[idx]
-
-
-# ─────────────────────────────────────────────
-#  MENSAJE BIENVENIDA GRUPO
-# ─────────────────────────────────────────────
 
 def mensaje_bienvenida_grupo():
     return (
         "*Bienvenido a DropNode Community MX*\n\n"
         "Aqui compartimos los mejores descuentos que nuestro equipo encuentra.\n\n"
-        "Canal de alertas gratuito: @DropNodeMX\n"
-        f"Canal VIP (errores de precio): {LAUNCHPASS_LINK}\n\n"
-        "*Reglas del grupo:*\n"
-        "1. Comparte solo ofertas reales verificadas\n"
-        "2. Sin spam ni links a otros canales\n"
+        f"Canal gratuito: @DropNodeMX\n"
+        f"Canal VIP: {LAUNCHPASS_LINK}\n\n"
+        "*Reglas:*\n"
+        "1. Solo ofertas reales verificadas\n"
+        "2. Sin links a otros canales\n"
         "3. Sin publicidad no autorizada\n"
-        "4. Respeta a todos los miembros\n\n"
-        "El incumplimiento de las reglas resulta en advertencia, "
-        "silencio temporal o expulsion segun la gravedad.\n\n"
+        "4. Respeta a todos\n\n"
         "_DropNode MX - Siempre encontramos el mejor precio._"
     )
 
@@ -262,249 +360,156 @@ def mensaje_bienvenida_grupo():
 def calcular_ahorro_estimado(alertas):
     total = 0.0
     for a in alertas:
-        precio    = a.get("precio_alerta", 0)
-        descuento = a.get("descuento_real", 0)
-        if precio and descuento and 0 < descuento < 1:
-            precio_original = precio / (1 - descuento)
-            total += (precio_original - precio)
+        p = a.get("precio_alerta", 0)
+        d = a.get("descuento_real", 0)
+        if p and d and 0 < d < 1:
+            total += (p / (1 - d)) - p
     return total
-
 
 def enviar_resumen_diario(total_vip=0, total_free=0):
     from database import get_metricas_autolearning
-
     alertas_hoy = []
     try:
-        todas       = get_metricas_autolearning()
-        hoy         = str(datetime.now().date())
+        todas = get_metricas_autolearning()
+        hoy   = str(hora_mx().date())
         alertas_hoy = [a for a in todas
                        if a.get("timestamp", "")[:10] == hoy]
     except Exception:
         pass
 
-    total_ops  = total_vip + total_free
-    ahorro_est = calcular_ahorro_estimado(alertas_hoy)
-    mejor_desc = 0.0
-    if alertas_hoy:
-        mejor_desc = max(
-            a.get("descuento_real", 0) for a in alertas_hoy
-        ) * 100
+    total   = total_vip + total_free
+    ahorro  = calcular_ahorro_estimado(alertas_hoy)
+    mejor_d = max((a.get("descuento_real", 0) for a in alertas_hoy),
+                  default=0) * 100
 
-    # Mensaje VIP
     msg_vip = (
         f"Resumen ultimas 24 hrs - DropNode MX VIP\n\n"
-        f"Alertas exclusivas VIP: *{total_vip}*\n"
+        f"Alertas VIP enviadas: *{total_vip}*\n"
         f"Alertas canal publico: *{total_free}*\n"
-        f"Oportunidades analizadas: *{total_ops}*\n"
+        f"Oportunidades analizadas: *{total}*\n"
     )
-    if mejor_desc > 0:
-        msg_vip += f"Mejor descuento del dia: *-{mejor_desc:.0f}%*\n"
-    if ahorro_est > 0:
-        msg_vip += f"Ahorro acumulado estimado: *~${ahorro_est:,.0f} MXN*\n"
+    if mejor_d > 0:
+        msg_vip += f"Mejor descuento del dia: *-{mejor_d:.0f}%*\n"
+    if ahorro > 0:
+        msg_vip += f"Ahorro acumulado estimado: *~${ahorro:,.0f} MXN*\n"
     msg_vip += "\n_Seguimos monitoreando las mejores oportunidades._"
 
-    # Mensaje Free
-    msg_free = f"Resumen del dia - DropNode MX\n\nOportunidades encontradas: *{total_ops}*\n"
-    if ahorro_est > 0:
-        msg_free += f"Ahorro estimado del canal: *~${ahorro_est:,.0f} MXN*\n"
-    msg_free += (
-        f"\n_Nuestro equipo sigue monitoreando._\n\n"
-        f"Acceso VIP: {LAUNCHPASS_LINK}"
-    )
+    msg_free = f"Resumen del dia - DropNode MX\n\nOportunidades encontradas: *{total}*\n"
+    if ahorro > 0:
+        msg_free += f"Ahorro estimado: *~${ahorro:,.0f} MXN*\n"
+    msg_free += f"\n_Nuestro equipo sigue monitoreando._\n\nAcceso VIP: {LAUNCHPASS_LINK}"
 
     enviar_mensaje(CHANNEL_VIP_ID, msg_vip)
     enviar_mensaje(CHANNEL_FREE_ID, msg_free)
 
 
 # ─────────────────────────────────────────────
-#  MODERACION AUTOMATICA DEL GRUPO
+#  MODERACION DEL GRUPO
 # ─────────────────────────────────────────────
 
+advertencias = {}
+DOMINIOS_SPAM = ["t.me/", "whatsapp.com", "bit.ly", "tinyurl", "shorturl"]
+DOMINIOS_OK   = ["mercadolibre", "amazon", "liverpool", "walmart",
+                  "coppel", "launchpass.com/marcodurzo", "platacard.mx"]
+
 def es_spam(texto):
-    """
-    Revisa si un mensaje contiene contenido no permitido.
-    Retorna True si debe ser moderado.
-    """
     if not texto:
         return False
-
-    texto_lower = texto.lower()
-
-    # Verificar si contiene un dominio permitido
-    for permitido in DOMINIOS_PERMITIDOS:
-        if permitido in texto_lower:
+    t = texto.lower()
+    for ok in DOMINIOS_OK:
+        if ok in t:
             return False
-
-    # Verificar si contiene un dominio de spam
     for spam in DOMINIOS_SPAM:
-        if spam in texto_lower:
+        if spam in t:
             return True
-
     return False
 
-
-def eliminar_mensaje(chat_id, message_id):
-    """Elimina un mensaje del grupo."""
+def eliminar_mensaje_chat(chat_id, message_id):
     try:
-        requests.post(
-            f"{TELEGRAM_API}/deleteMessage",
-            json={"chat_id": chat_id, "message_id": message_id},
-            timeout=10
-        )
-    except Exception as e:
-        logger.error(f"[MOD] Error eliminando mensaje: {e}")
+        requests.post(f"{TELEGRAM_API}/deleteMessage",
+                      json={"chat_id": chat_id, "message_id": message_id},
+                      timeout=10)
+    except Exception:
+        pass
 
-
-def silenciar_usuario(chat_id, user_id, segundos=3600):
-    """
-    Restringe a un usuario para que no pueda escribir.
-    Por default: 1 hora (3600 segundos).
-    """
+def silenciar(chat_id, user_id, segundos=3600):
     import time as t
-    hasta = int(t.time()) + segundos
     try:
-        requests.post(
-            f"{TELEGRAM_API}/restrictChatMember",
-            json={
-                "chat_id":     chat_id,
-                "user_id":     user_id,
-                "until_date":  hasta,
-                "permissions": {
-                    "can_send_messages":       False,
-                    "can_send_media_messages": False,
-                    "can_send_polls":          False,
-                    "can_send_other_messages": False,
-                }
-            },
-            timeout=10
-        )
-        logger.info(f"[MOD] Usuario {user_id} silenciado por {segundos}s")
-    except Exception as e:
-        logger.error(f"[MOD] Error silenciando: {e}")
+        requests.post(f"{TELEGRAM_API}/restrictChatMember",
+                      json={"chat_id": chat_id, "user_id": user_id,
+                            "until_date": int(t.time()) + segundos,
+                            "permissions": {
+                                "can_send_messages": False,
+                                "can_send_media_messages": False,
+                            }}, timeout=10)
+    except Exception:
+        pass
 
-
-def banear_usuario(chat_id, user_id):
-    """Banea permanentemente a un usuario del grupo."""
+def banear(chat_id, user_id):
     try:
-        requests.post(
-            f"{TELEGRAM_API}/banChatMember",
-            json={"chat_id": chat_id, "user_id": user_id},
-            timeout=10
-        )
-        logger.info(f"[MOD] Usuario {user_id} baneado")
-    except Exception as e:
-        logger.error(f"[MOD] Error baneando: {e}")
-
+        requests.post(f"{TELEGRAM_API}/banChatMember",
+                      json={"chat_id": chat_id, "user_id": user_id},
+                      timeout=10)
+    except Exception:
+        pass
 
 def procesar_mensaje_grupo(update):
-    """
-    Revisa cada mensaje nuevo en el grupo Community.
-    Sistema de 3 pasos:
-      1ra infraccion  -> advertencia + borrar mensaje
-      2da infraccion  -> silencio 1 hora + borrar mensaje
-      3ra infraccion  -> ban permanente
-    """
     try:
-        msg      = update.get("message", {})
-        chat     = msg.get("chat", {})
-        user     = msg.get("from", {})
-        texto    = msg.get("text", "")
-        msg_id   = msg.get("message_id")
-        chat_id  = chat.get("id")
-        user_id  = user.get("id")
-        username = user.get("username", "usuario")
-        nombre   = user.get("first_name", "Usuario")
+        msg     = update.get("message", {})
+        chat    = msg.get("chat", {})
+        user    = msg.get("from", {})
+        texto   = msg.get("text", "")
+        msg_id  = msg.get("message_id")
+        chat_id = chat.get("id")
+        user_id = user.get("id")
+        nombre  = user.get("first_name", "Usuario")
 
-        # Solo moderar mensajes del grupo Community
-        if chat_id != GROUP_ID:
+        if chat_id != GROUP_ID or user.get("is_bot"):
             return
-
-        # No moderar a administradores (bots o admins del canal)
-        if user.get("is_bot"):
-            return
-
         if not es_spam(texto):
             return
 
-        # Contar advertencias
         count = advertencias.get(user_id, 0) + 1
         advertencias[user_id] = count
-
-        # Borrar el mensaje en todos los casos
-        eliminar_mensaje(chat_id, msg_id)
+        eliminar_mensaje_chat(chat_id, msg_id)
 
         if count == 1:
-            # Primera vez: advertencia publica
-            aviso = (
-                f"Hola {nombre}, tu mensaje fue removido.\n\n"
-                f"Las reglas del grupo no permiten links a otros canales "
-                f"ni publicidad no autorizada.\n\n"
-                f"Esta es tu primera advertencia. "
-                f"Una segunda infraccion resultara en silencio temporal."
-            )
-            enviar_mensaje(chat_id, aviso)
-            logger.info(f"[MOD] Advertencia 1 a {username} ({user_id})")
-
+            enviar_mensaje(chat_id,
+                f"{nombre}, tu mensaje fue removido. "
+                f"Primera advertencia — sin links a otros canales.")
         elif count == 2:
-            # Segunda vez: silencio 1 hora
-            silenciar_usuario(chat_id, user_id, segundos=3600)
-            aviso = (
-                f"{nombre} ha sido silenciado por 1 hora "
-                f"por reincidencia en el envio de spam.\n"
-                f"Una tercera infraccion resultara en expulsion permanente."
-            )
-            enviar_mensaje(chat_id, aviso)
-            logger.info(f"[MOD] Silencio 1h a {username} ({user_id})")
-
+            silenciar(chat_id, user_id, 3600)
+            enviar_mensaje(chat_id,
+                f"{nombre} silenciado 1 hora por reincidencia.")
         else:
-            # Tercera vez: ban permanente
-            banear_usuario(chat_id, user_id)
-            aviso = (
-                f"{nombre} ha sido expulsado del grupo "
-                f"por multiples infracciones a las reglas."
-            )
-            enviar_mensaje(chat_id, aviso)
-            # Limpiar del registro
+            banear(chat_id, user_id)
             advertencias.pop(user_id, None)
-            logger.info(f"[MOD] Ban permanente a {username} ({user_id})")
-
+            enviar_mensaje(chat_id,
+                f"{nombre} expulsado por multiples infracciones.")
     except Exception as e:
-        logger.error(f"[MOD] Error procesando mensaje: {e}")
-
+        logger.error(f"[MOD] {e}")
 
 def revisar_actualizaciones_grupo():
-    """
-    Revisa mensajes nuevos en el grupo usando getUpdates.
-    Se llama desde main.py cada minuto.
-    """
     try:
-        resp = requests.get(
-            f"{TELEGRAM_API}/getUpdates",
-            params={"timeout": 5, "allowed_updates": ["message"]},
-            timeout=15
-        )
-        data = resp.json()
-        if not data.get("ok"):
-            return
-
+        resp = requests.get(f"{TELEGRAM_API}/getUpdates",
+                           params={"timeout": 5,
+                                   "allowed_updates": ["message"]},
+                           timeout=15)
+        data    = resp.json()
         updates = data.get("result", [])
-        for update in updates:
-            procesar_mensaje_grupo(update)
-
-        # Confirmar que procesamos hasta este update
+        for u in updates:
+            procesar_mensaje_grupo(u)
         if updates:
-            last_id = updates[-1]["update_id"]
-            requests.get(
-                f"{TELEGRAM_API}/getUpdates",
-                params={"offset": last_id + 1, "limit": 1},
-                timeout=10
-            )
+            last = updates[-1]["update_id"]
+            requests.get(f"{TELEGRAM_API}/getUpdates",
+                        params={"offset": last + 1, "limit": 1},
+                        timeout=10)
     except Exception as e:
-        logger.error(f"[MOD] Error en getUpdates: {e}")
+        logger.error(f"[MOD] getUpdates: {e}")
 
 
 # ─────────────────────────────────────────────
-#  ENVIO DE MENSAJES
+#  ENVIO
 # ─────────────────────────────────────────────
 
 def enviar_mensaje(chat_id, texto, preview=False):
@@ -519,40 +524,31 @@ def enviar_mensaje(chat_id, texto, preview=False):
         resp = requests.post(url, json=payload, timeout=15)
         data = resp.json()
         if data.get("ok"):
-            msg_id = data["result"]["message_id"]
-            logger.info(f"[TG OK] chat={chat_id} msg={msg_id}")
-            return msg_id
+            return data["result"]["message_id"]
         else:
-            logger.error(f"[TG ERR] {data.get('description', '?')}")
+            logger.error(f"[TG] {data.get('description', '?')}")
             return None
     except Exception as e:
-        logger.error(f"[TG EXC] {e}")
+        logger.error(f"[TG] {e}")
         return None
 
-
 def fijar_mensaje(chat_id, message_id):
-    requests.post(
-        f"{TELEGRAM_API}/pinChatMessage",
-        json={"chat_id": chat_id, "message_id": message_id},
-        timeout=10
-    )
-
+    try:
+        requests.post(f"{TELEGRAM_API}/pinChatMessage",
+                      json={"chat_id": chat_id, "message_id": message_id},
+                      timeout=10)
+    except Exception:
+        pass
 
 def enviar_y_fijar_bienvenida_grupo():
-    texto  = mensaje_bienvenida_grupo()
-    msg_id = enviar_mensaje(GROUP_ID, texto)
+    msg_id = enviar_mensaje(GROUP_ID, mensaje_bienvenida_grupo())
     if msg_id:
         fijar_mensaje(GROUP_ID, msg_id)
-        logger.info(f"[SETUP] Bienvenida fijada en grupo")
-
-
-# ─────────────────────────────────────────────
-#  FUNCIONES PUBLICAS PARA main.py
-# ─────────────────────────────────────────────
 
 def enviar_alerta(alerta):
     if not dentro_de_horario():
         return False
+
     interp = interpretar_score(alerta["heat_score"])
     canal  = interp["canal"]
     if canal == "descartar":
@@ -560,12 +556,12 @@ def enviar_alerta(alerta):
 
     msg_id = None
     if canal == "vip":
-        msg_id = enviar_mensaje(CHANNEL_VIP_ID, formatear_mensaje_vip(alerta))
+        msg_id = enviar_mensaje(CHANNEL_VIP_ID, formatear_vip(alerta))
         if alerta["heat_score"] >= 5:
             time.sleep(3)
-            enviar_mensaje(CHANNEL_FREE_ID, formatear_mensaje_free(alerta))
+            enviar_mensaje(CHANNEL_FREE_ID, formatear_free(alerta))
     else:
-        msg_id = enviar_mensaje(CHANNEL_FREE_ID, formatear_mensaje_free(alerta))
+        msg_id = enviar_mensaje(CHANNEL_FREE_ID, formatear_free(alerta))
 
     if msg_id:
         guardar_alerta(
@@ -578,30 +574,31 @@ def enviar_alerta(alerta):
         )
     return msg_id is not None
 
-
 def enviar_mensaje_financiero():
-    """Publica en los 3 destinos con formato adaptado a cada uno."""
-    # Canal free — version completa
     texto_free = formatear_financiero_free()
+    texto_vip  = formatear_financiero_vip()
     if texto_free:
         enviar_mensaje(CHANNEL_FREE_ID, texto_free)
-
-    # Canal VIP — version corta
-    texto_vip = formatear_financiero_vip()
     if texto_vip:
         enviar_mensaje(CHANNEL_VIP_ID, texto_vip)
-
-    # Grupo Community — solo una vez al dia, en el envio de las 11am
-    if datetime.now().hour == 11:
-        texto_grupo = formatear_financiero_grupo()
-        if texto_grupo:
-            enviar_mensaje(GROUP_ID, texto_grupo)
-
-    logger.info("[FINANCIERO] Publicado en todos los canales")
-
+    if hora_mx().hour == 11:
+        activos = [p for p in PRODUCTOS_FINANCIEROS if p["activo"]]
+        if activos:
+            prod = activos[(hora_mx().day + 1) % len(activos)]
+            enviar_mensaje(GROUP_ID,
+                f"{prod['emoji']} *Tip financiero*\n\n"
+                f"*{prod['nombre']}* - {prod['descripcion']}\n\n"
+                f"[Mas info]({prod['link']})")
 
 def enviar_recordatorio_vip():
     if not LAUNCHPASS_LINK:
         return
     enviar_mensaje(CHANNEL_FREE_ID, formatear_recordatorio_vip())
-    logger.info("[VIP CTA] Publicado en canal free")
+
+def publicar_mejores_del_dia(destacados: list):
+    if not destacados:
+        return
+    msg = formatear_mejor_del_dia(destacados)
+    if msg:
+        enviar_mensaje(CHANNEL_FREE_ID, msg)
+        logger.info(f"[DESTACADOS] {len(destacados[:5])} publicados")
