@@ -77,7 +77,7 @@ def buscar_walmart_html(query: str) -> list:
             except Exception:
                 pass
         # Buscar en script tags
-        soup   = BeautifulSoup(resp.text, "lxml")
+        soup   = BeautifulSoup(resp.text, "html.parser")
         scripts = soup.find_all("script", type="application/json")
         for sc in scripts:
             try:
