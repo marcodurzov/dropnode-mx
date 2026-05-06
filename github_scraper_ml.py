@@ -84,15 +84,17 @@ def hacer_llamada_ml(url_ml: str, params: dict = None) -> dict | None:
 
     # Si hay ScraperAPI key, rutar a través de él
     if SCRAPER_API_KEY:
-        proxy_url = (f"http://api.scraperapi.com"
+        encoded = urllib.parse.quote(url_ml, safe="")
+        proxy_url = (f"https://api.scraperapi.com"
                      f"?api_key={SCRAPER_API_KEY}"
-                     f"&url={urllib.parse.quote(url_ml)}")
+                     f"&url={encoded}"
+                     f"&country_code=mx")
         try:
-            time.sleep(random.uniform(2, 5))
-            r = requests.get(proxy_url, timeout=30)
+            time.sleep(random.uniform(1, 3))
+            r = requests.get(proxy_url, timeout=90)
             if r.status_code == 200:
                 return r.json()
-            logger.warning(f"[SCRAPER_API] HTTP {r.status_code}")
+            logger.warning(f"[SCRAPER_API] HTTP {r.status_code}: {r.text[:80]}")
         except Exception as e:
             logger.error(f"[SCRAPER_API] {e}")
         return None
