@@ -1,13 +1,10 @@
 # =============================================================
-# DROPNODE MX — scraper_walmart.py
-# Scraper de Walmart Mexico usando su API publica
-# Sin afiliado por ahora — genera contenido de valor
+# DROPNODE MX — scraper_walmart.py  v2.1
+# Walmart Mexico — endpoint corregido
 # =============================================================
 
-import requests
-import time
-import random
-import logging
+import requests, time, random, logging
+from bs4 import BeautifulSoup
 
 logger = logging.getLogger(__name__)
 
@@ -17,72 +14,115 @@ USER_AGENTS = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/122.0.0.0 Safari/537.36",
 ]
 
-CATEGORIAS_WALMART = [
-    {"query": "celulares smartphones",  "emoji": "📱"},
-    {"query": "laptops computadoras",   "emoji": "💻"},
-    {"query": "televisores smart tv",   "emoji": "📺"},
-    {"query": "videojuegos consolas",   "emoji": "🎮"},
-    {"query": "electrodomesticos",      "emoji": "🏠"},
-    {"query": "audifonos bocinas",      "emoji": "🎧"},
+BUSQUEDAS = [
+    {"q": "celular smartphone",   "emoji": "📱", "cat": "Celulares"},
+    {"q": "laptop computadora",   "emoji": "💻", "cat": "Computacion"},
+    {"q": "smart tv television",  "emoji": "📺", "cat": "Televisores"},
+    {"q": "audifonos bluetooth",  "emoji": "🎧", "cat": "Audio"},
+    {"q": "videojuegos consola",  "emoji": "🎮", "cat": "Videojuegos"},
+    {"q": "tablet",               "emoji": "📱", "cat": "Tablets"},
 ]
 
 def get_headers():
     return {
         "User-Agent":      random.choice(USER_AGENTS),
-        "Accept":          "application/json",
+        "Accept":          "application/json, text/plain, */*",
         "Accept-Language": "es-MX,es;q=0.9",
+        "Accept-Encoding": "gzip, deflate, br",
         "Referer":         "https://www.walmart.com.mx/",
+        "Origin":          "https://www.walmart.com.mx",
     }
 
 def esperar():
-    time.sleep(random.uniform(5, 12))
+    time.sleep(random.uniform(5, 11))
 
-def buscar_walmart(query: str, limit: int = 20) -> list:
-    """
-    Busca productos en Walmart MX con descuento.
-    Usa el endpoint de busqueda publica de Walmart.
-    """
-    url = "https://www.walmart.com.mx/api/2/page"
+def buscar_walmart(query: str) -> list:
+    """Busca en Walmart MX usando su endpoint de búsqueda."""
+    url    = "https://www.walmart.com.mx/api/2/page"
     params = {
-        "pathName": f"/search",
+        "pathName": "/search",
         "query":    query,
-        "page":     1,
-        "ps":       limit,
+        "page":     "1",
+        "pageSize": "20",
     }
-
     try:
         esperar()
         resp = requests.get(url, params=params,
-                           headers=get_headers(), timeout=15)
-        if resp.status_code != 200:
-            logger.warning(f"[WALMART] HTTP {resp.status_code} para '{query}'")
-            return []
+                           headers=get_headers(), timeout=20)
+        if resp.status_code == 200:
+            data = resp.json()
+            # Navegar la estructura JSON de Walmart
+            content = (data.get("data", {})
+                          .get("content", {})
+                          .get("gsp", {})
+                          .get("results", []))
+            if content:
+                return content
 
-        data = resp.json()
-        items_raw = (data.get("data", {})
+            # Estructura alternativa
+            items = (data.get("data", {})
                         .get("content", {})
-                        .get("gsp", {})
-                        .get("results", []))
-        return items_raw
+                        .get("searchContent", {})
+                        .get("paginationV2", {})
+                        .get("resp", [{}])[0]
+                        .get("items", []))
+            return items
 
+        logger.warning(f"[WALMART] HTTP {resp.status_code}")
+        return []
     except Exception as e:
-        logger.error(f"[WALMART] Error en '{query}': {e}")
+        logger.error(f"[WALMART] Error: {e}")
         return []
 
-
-def parsear_item_walmart(item: dict) -> dict | None:
-    """Extrae los datos relevantes de un item de Walmart."""
+def buscar_walmart_alternativo(query: str) -> list:
+    """Método alternativo: scraping del HTML de Walmart."""
+    url    = f"https://www.walmart.com.mx/search?q={urllib.parse.quote(query)}"
     try:
-        product = item.get("product", {})
-        offers  = item.get("offers", [{}])
-        offer   = offers[0] if offers else {}
+        esperar()
+        resp = requests.get(url, headers={
+            **get_headers(),
+            "Accept": "text/html,application/xhtml+xml",
+        }, timeout=20)
+        if resp.status_code != 200:
+            return []
 
-        nombre        = product.get("productName", "")
-        precio_actual = float(offer.get("currentPrice", 0))
-        precio_orig   = float(offer.get("wasPrice", 0) or precio_actual)
-        sku           = product.get("productId", "")
-        imagen        = product.get("imageUrl", "")
-        url_producto  = f"https://www.walmart.com.mx/ip/{sku}"
+        import json, re
+        # Buscar JSON de productos en el HTML
+        pattern = r'"items"\s*:\s*(\[.*?\])'
+        match   = re.search(pattern, resp.text, re.DOTALL)
+        if match:
+            return json.loads(match.group(1))
+        return []
+    except Exception:
+        return []
+
+def parsear_item(item: dict, cat: dict) -> dict | None:
+    """Extrae datos relevantes del item de Walmart."""
+    try:
+        # Intentar diferentes estructuras del JSON de Walmart
+        nombre = (item.get("name") or
+                  item.get("title") or
+                  item.get("displayName") or "")[:80]
+
+        precio_actual = float(
+            item.get("price") or
+            item.get("salePrice") or
+            item.get("currentPrice") or 0)
+
+        precio_orig = float(
+            item.get("wasPrice") or
+            item.get("originalPrice") or
+            item.get("listPrice") or
+            precio_actual)
+
+        sku      = str(item.get("usItemId") or item.get("id") or
+                      item.get("productId") or "")
+        imagen   = (item.get("imageUrl") or
+                   item.get("image", {}).get("url") or "")
+        url_prod = (item.get("canonicalUrl") or
+                   f"https://www.walmart.com.mx/ip/{sku}")
+        if not url_prod.startswith("http"):
+            url_prod = f"https://www.walmart.com.mx{url_prod}"
 
         if not nombre or precio_actual <= 0:
             return None
@@ -91,37 +131,34 @@ def parsear_item_walmart(item: dict) -> dict | None:
         if precio_orig > precio_actual:
             descuento = (precio_orig - precio_actual) / precio_orig
 
-        return {
-            "tienda":         "walmart",
-            "nombre":         nombre[:80],
-            "precio_actual":  precio_actual,
-            "precio_original":precio_orig,
-            "descuento":      descuento,
-            "sku":            sku,
-            "url":            url_producto,
-            "thumbnail":      imagen,
-        }
+        if descuento < 0.15:
+            return None
 
+        return {
+            "tienda":          "walmart",
+            "nombre":          nombre,
+            "precio_actual":   precio_actual,
+            "precio_original": precio_orig,
+            "descuento":       descuento,
+            "sku":             sku,
+            "url":             url_prod,
+            "thumbnail":       imagen,
+            "categoria":       {"nombre": cat["cat"], "emoji": cat["emoji"]},
+        }
     except Exception:
         return None
 
-
 def ejecutar_ciclo_walmart() -> list:
-    """
-    Ejecuta scraping de Walmart para todas las categorias.
-    Retorna lista de productos con descuento >= 15%.
-    """
+    import urllib.parse
     logger.info("[WALMART] Iniciando ciclo...")
     resultados = []
-
-    for cat in CATEGORIAS_WALMART:
-        items_raw = buscar_walmart(cat["query"])
-        for item_raw in items_raw:
-            item = parsear_item_walmart(item_raw)
-            if item and item["descuento"] >= 0.15:
-                item["categoria"] = {"nombre": cat["query"].split()[0].capitalize(),
-                                     "emoji":  cat["emoji"]}
-                resultados.append(item)
-
-    logger.info(f"[WALMART] {len(resultados)} productos con descuento encontrados")
+    for cat in BUSQUEDAS[:4]:
+        items = buscar_walmart(cat["q"])
+        if not items:
+            items = buscar_walmart_alternativo(cat["q"])
+        for item in items:
+            r = parsear_item(item, cat)
+            if r:
+                resultados.append(r)
+    logger.info(f"[WALMART] {len(resultados)} productos con descuento")
     return resultados
