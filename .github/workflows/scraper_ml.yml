@@ -27,6 +27,7 @@ jobs:
 
       - name: Run ML scraper
         env:
+          SCRAPER_API_KEY: ${{ secrets.SCRAPER_API_KEY }}
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
