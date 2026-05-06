@@ -5,6 +5,8 @@
 # =============================================================
 
 import os, requests, time, random, logging, sys, urllib.parse
+import urllib3
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 from datetime import datetime, timedelta, timezone
 from supabase import create_client
 
@@ -84,19 +86,21 @@ def hacer_llamada_ml(url_ml: str, params: dict = None) -> dict | None:
 
     # Si hay ScraperAPI key, rutar a través de él
     if SCRAPER_API_KEY:
-        encoded = urllib.parse.quote(url_ml, safe="")
-        proxy_url = (f"https://api.scraperapi.com"
-                     f"?api_key={SCRAPER_API_KEY}"
-                     f"&url={encoded}"
-                     f"&country_code=mx")
+        # Modo proxy directo — ScraperAPI actua como proxy puro
+        # sin modificar el request/response (ideal para JSON APIs)
+        proxies = {
+            "http":  f"http://scraperapi:{SCRAPER_API_KEY}@proxy-server.scraperapi.com:8001",
+            "https": f"http://scraperapi:{SCRAPER_API_KEY}@proxy-server.scraperapi.com:8001",
+        }
         try:
             time.sleep(random.uniform(1, 3))
-            r = requests.get(proxy_url, timeout=90)
+            r = requests.get(url_ml, headers=headers,
+                             proxies=proxies, verify=False, timeout=90)
             if r.status_code == 200:
                 return r.json()
-            logger.warning(f"[SCRAPER_API] HTTP {r.status_code}: {r.text[:80]}")
+            logger.warning(f"[PROXY] HTTP {r.status_code}")
         except Exception as e:
-            logger.error(f"[SCRAPER_API] {e}")
+            logger.error(f"[PROXY] {e}")
         return None
     else:
         # Sin proxy — intento directo (puede dar 403 en datacenter)
