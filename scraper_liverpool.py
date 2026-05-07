@@ -1,90 +1,98 @@
-# =============================================================
-# DROPNODE MX — scraper_liverpool.py
-# Liverpool Mexico — API interna publica
-# =============================================================
+# DropNode MX — scraper_liverpool.py
+# Liverpool MX — API oficial de Shopping
+import requests, time, random, logging, json
 
-import requests, time, random, logging
 logger = logging.getLogger(__name__)
 
-USER_AGENTS = [
-    "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15",
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) Chrome/122.0.0.0 Safari/537.36",
+HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/124.0.0.0 Safari/537.36",
+    "Accept": "application/json, text/plain, */*",
+    "Accept-Language": "es-MX,es;q=0.9",
+    "Origin": "https://www.liverpool.com.mx",
+    "Referer": "https://www.liverpool.com.mx/",
+}
+
+BUSQUEDAS = [
+    {"q": "laptop",             "emoji": "💻", "cat": "Computacion"},
+    {"q": "television 4k",      "emoji": "📺", "cat": "Televisores"},
+    {"q": "celular smartphone",  "emoji": "📱", "cat": "Celulares"},
+    {"q": "iphone",             "emoji": "📱", "cat": "Celulares"},
+    {"q": "samsung galaxy",     "emoji": "📱", "cat": "Celulares"},
+    {"q": "audifonos",          "emoji": "🎧", "cat": "Audio"},
+    {"q": "consola videojuegos", "emoji": "🎮", "cat": "Videojuegos"},
+    {"q": "tablet ipad",        "emoji": "📱", "cat": "Tablets"},
 ]
 
-CATEGORIAS_LIVERPOOL = [
-    {"id": "D0060201",  "nombre": "Celulares",      "emoji": "📱"},
-    {"id": "D006020201","nombre": "Laptops",         "emoji": "💻"},
-    {"id": "D0060206",  "nombre": "Televisores",     "emoji": "📺"},
-    {"id": "D0060207",  "nombre": "Audio",           "emoji": "🎧"},
-    {"id": "D0060208",  "nombre": "Videojuegos",     "emoji": "🎮"},
-    {"id": "D0030101",  "nombre": "Electrodomesticos","emoji": "🏠"},
-]
-
-def get_headers():
-    return {
-        "User-Agent":      random.choice(USER_AGENTS),
-        "Accept":          "application/json",
-        "Accept-Language": "es-MX,es;q=0.9",
-        "Origin":          "https://www.liverpool.com.mx",
-        "Referer":         "https://www.liverpool.com.mx/",
-    }
-
-def esperar():
-    time.sleep(random.uniform(5, 11))
-
-def buscar_liverpool(categoria_id: str, pagina: int = 1) -> list:
-    url = "https://shoppingapi.liverpool.com.mx/search/category"
-    params = {
-        "categoryId":    categoria_id,
-        "currentPage":   pagina,
-        "pageSize":      24,
-        "sortBy":        "discount-desc",  # Ordenar por mayor descuento
-        "country":       "MX",
-    }
+def buscar(query: str) -> list:
     try:
-        esperar()
-        resp = requests.get(url, params=params, headers=get_headers(), timeout=15)
-        if resp.status_code != 200:
-            logger.warning(f"[LIVERPOOL] HTTP {resp.status_code}")
-            return []
-        data  = resp.json()
-        prods = data.get("products", []) or data.get("results", [])
-        return prods
+        time.sleep(random.uniform(3, 6))
+        # API oficial de Liverpool Shopping
+        r = requests.get(
+            "https://shoppingapi.liverpool.com.mx/api/2.0/page",
+            params={
+                "pathName": "/search",
+                "query": query,
+                "type": "search",
+                "customerPreference": "liverpool",
+                "page": "0",
+                "rows": "48",
+                "sort": "discounts",  # Ordenar por mayor descuento
+            },
+            headers=HEADERS, timeout=20
+        )
+        if r.status_code == 200:
+            data = r.json()
+            # Navegar estructura de respuesta de Liverpool
+            records = (data.get("data", {})
+                          .get("results", {})
+                          .get("Product", {})
+                          .get("records", []))
+            if records:
+                return records
+            # Estructura alternativa
+            records = (data.get("data", {})
+                          .get("records", []))
+            return records or []
+        logger.warning(f"[LIVERPOOL] HTTP {r.status_code} para '{query}'")
+        return []
     except Exception as e:
-        logger.error(f"[LIVERPOOL] Error: {e}")
+        logger.error(f"[LIVERPOOL] {e}")
         return []
 
-def parsear_item_liverpool(item: dict, categoria: dict) -> dict | None:
+def parsear(record: dict, cat: dict) -> dict | None:
     try:
-        nombre        = item.get("name", item.get("title", ""))[:80]
-        precio_actual = float(item.get("price", {}).get("value", 0) or
-                              item.get("currentPrice", 0) or 0)
-        precio_orig   = float(item.get("price", {}).get("originalValue", 0) or
-                              item.get("originalPrice", 0) or precio_actual)
-        sku           = str(item.get("code", item.get("id", "")))
-        thumbnail     = item.get("images", [{}])[0].get("url", "") if item.get("images") else ""
-        url_prod      = f"https://www.liverpool.com.mx/tienda/pdp/{sku}"
-
-        if not nombre or precio_actual <= 0:
+        attrs = record.get("attributes", {})
+        nombre = str(attrs.get("product.displayName", [""])[0] or
+                     attrs.get("product.name", [""])[0])[:80]
+        precio_str = (attrs.get("sku.activePrice", ["0"])[0] or
+                      attrs.get("sku.listPrice", ["0"])[0])
+        precio = float(str(precio_str).replace(",",""))
+        precio_orig_str = (attrs.get("sku.listPrice", ["0"])[0] or
+                           attrs.get("sku.compareAtPrice", ["0"])[0])
+        precio_orig = float(str(precio_orig_str).replace(",",""))
+        sku = str(attrs.get("sku.repositoryId", [""])[0] or
+                  record.get("id", ""))
+        url_base = str(attrs.get("product.canonicalUrl", [""])[0] or "")
+        if url_base and not url_base.startswith("http"):
+            url_base = "https://www.liverpool.com.mx" + url_base
+        img = str(attrs.get("sku.primarySmallImageUrl", [""])[0] or "")
+        if not nombre or precio <= 0 or not url_base:
             return None
-
         descuento = 0.0
-        if precio_orig > precio_actual:
-            descuento = (precio_orig - precio_actual) / precio_orig
-
-        if descuento < 0.15:
+        if precio_orig > precio:
+            descuento = (precio_orig - precio) / precio_orig
+        if descuento < 0.10:
             return None
-
         return {
-            "tienda":          "liverpool",
-            "nombre":          nombre,
-            "precio_actual":   precio_actual,
+            "tienda": "liverpool",
+            "nombre": nombre,
+            "precio_actual": precio,
             "precio_original": precio_orig,
-            "descuento":       descuento,
-            "sku":             sku,
-            "url":             url_prod,
-            "thumbnail":       thumbnail,
-            "categoria":       categoria,
+            "descuento": descuento,
+            "sku": sku,
+            "url": url_base,
+            "thumbnail": img,
+            "categoria": {"nombre": cat["cat"], "emoji": cat["emoji"]},
         }
     except Exception:
         return None
@@ -92,11 +100,18 @@ def parsear_item_liverpool(item: dict, categoria: dict) -> dict | None:
 def ejecutar_ciclo_liverpool() -> list:
     logger.info("[LIVERPOOL] Iniciando ciclo...")
     resultados = []
-    for cat in CATEGORIAS_LIVERPOOL[:3]:
-        items = buscar_liverpool(cat["id"])
-        for item in items:
-            r = parsear_item_liverpool(item, cat)
+    for cat in BUSQUEDAS[:4]:  # 4 busquedas por ciclo
+        records = buscar(cat["q"])
+        for rec in records:
+            r = parsear(rec, cat)
             if r:
                 resultados.append(r)
-    logger.info(f"[LIVERPOOL] {len(resultados)} productos encontrados")
-    return resultados
+    # Deduplicar por SKU
+    seen = set()
+    unicos = []
+    for r in resultados:
+        if r["sku"] not in seen:
+            seen.add(r["sku"])
+            unicos.append(r)
+    logger.info(f"[LIVERPOOL] {len(unicos)} productos con descuento")
+    return unicos
