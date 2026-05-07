@@ -1,229 +1,118 @@
-# =============================================================
-# DROPNODE MX — community_manager.py
-# Mensajes automaticos de engagement para el grupo Community
-# Genera conversacion, cercania y datos de la audiencia
-# =============================================================
-
-import requests, logging, random
+import requests
+import logging
+import random
 from datetime import datetime, timezone, timedelta
 from config import TELEGRAM_TOKEN, GROUP_ID, CHANNEL_FREE_ID, LAUNCHPASS_LINK
 
 logger       = logging.getLogger(__name__)
-TELEGRAM_API = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}"
+TELEGRAM_API = "https://api.telegram.org/bot" + TELEGRAM_TOKEN
 TZ_MEXICO    = timezone(timedelta(hours=-6))
 
 def hora_mx():
     return datetime.now(TZ_MEXICO)
 
-
-# ─────────────────────────────────────────────
-#  POLLS (encuestas nativas de Telegram)
-# ─────────────────────────────────────────────
-
-def enviar_poll(chat_id: int, pregunta: str,
-                opciones: list, anonimo: bool = True):
-    """
-    Envia una encuesta nativa de Telegram.
-    Los resultados se ven en tiempo real dentro del grupo.
-    """
+def enviar_grupo(texto):
     try:
-        resp = requests.post(f"{TELEGRAM_API}/sendPoll", json={
-            "chat_id":    chat_id,
-            "question":   pregunta,
-            "options":    opciones,
-            "is_anonymous": anonimo,
-        }, timeout=15)
-        data = resp.json()
-        if data.get("ok"):
-            logger.info(f"[POLL] Enviado: {pregunta[:40]}")
-            return data["result"]["message_id"]
-        else:
-            logger.error(f"[POLL] Error: {data.get('description')}")
-    except Exception as e:
-        logger.error(f"[POLL] {e}")
-    return None
-
-def enviar_mensaje_grupo(texto: str):
-    """Envia mensaje de texto al grupo Community."""
-    try:
-        resp = requests.post(f"{TELEGRAM_API}/sendMessage", json={
-            "chat_id":    GROUP_ID,
-            "text":       texto,
+        r = requests.post(TELEGRAM_API + "/sendMessage", json={
+            "chat_id": GROUP_ID, "text": texto,
             "parse_mode": "Markdown",
-            "disable_web_page_preview": True,
+            "disable_web_page_preview": True
         }, timeout=15)
-        return resp.json().get("ok", False)
+        return r.json().get("ok", False)
     except Exception as e:
-        logger.error(f"[COMMUNITY] {e}")
+        logger.error("[COMMUNITY] " + str(e))
+        return False
+
+def enviar_poll(pregunta, opciones):
+    try:
+        r = requests.post(TELEGRAM_API + "/sendPoll", json={
+            "chat_id": GROUP_ID, "question": pregunta,
+            "options": opciones, "is_anonymous": True
+        }, timeout=15)
+        return r.json().get("ok", False)
+    except Exception as e:
+        logger.error("[POLL] " + str(e))
         return False
 
 
-# ─────────────────────────────────────────────
-#  MENSAJES POR DIA DE LA SEMANA
-# ─────────────────────────────────────────────
+MENSAJES_LUNES = [
+    "*DropNode te escucha*\n\nComienza la semana. Dinos: que producto estas buscando?\n\nNuestro equipo monitorea lo que la comunidad pide. Los mas solicitados van al canal primero.\n\nEscribe aqui: marca, modelo o categoria.",
+    "*Inicio de semana en DropNode MX*\n\nQue compra tienes pendiente esta semana?\n\nNos lo dices aqui y lo ponemos en el radar. Sin promesas, pero lo intentamos.",
+    "*Que quieres encontrar esta semana?*\n\nNuestro equipo esta monitoreando. Si hay algo especifico que buscas, dilo aqui.\n\nLos mas pedidos aparecen primero en el canal.",
+]
 
-def mensaje_lunes():
-    """Lunes 10 AM — Peticion de productos."""
-    preguntas = [
-        ("¿Que producto estas buscando esta semana?\n\n"
-         "Dinos aqui y nuestro equipo lo monitorea.\n"
-         "Los mas pedidos van al canal primero."),
-        ("Inicio de semana en DropNode MX\n\n"
-         "¿Que compra tienes pendiente?\n"
-         "Ponlo aqui y lo buscamos para ti."),
-        ("¿Que producto quieres encontrar a buen precio esta semana?\n\n"
-         "Respondenos aqui — monitoreamos lo que la comunidad pide."),
-    ]
-    return random.choice(preguntas)
+POLLS_MIERCOLES = [
+    {"pregunta": "Que categoria te interesa mas esta semana?",
+     "opciones": ["Celulares y smartphones", "Laptops y computadoras", "Televisores y audio", "Videojuegos y consolas", "Electrodomesticos"]},
+    {"pregunta": "Para que usas mas las alertas de DropNode MX?",
+     "opciones": ["Para mi uso personal", "Para revender (flipping)", "Para regalar", "Solo estoy explorando"]},
+    {"pregunta": "Con que presupuesto sueles comprar cuando hay buena oferta?",
+     "opciones": ["Menos de $500 MXN", "$500 - $2,000 MXN", "$2,000 - $5,000 MXN", "Mas de $5,000 MXN"]},
+    {"pregunta": "Que tienda tiene las mejores ofertas reales en tu experiencia?",
+     "opciones": ["Mercado Libre", "Amazon MX", "Liverpool", "Walmart MX"]},
+]
 
-def poll_miercoles():
-    """Miercoles 6 PM — Poll de categoria."""
-    polls = [
-        {
-            "pregunta": "¿Que categoria te interesa mas esta semana?",
-            "opciones": ["📱 Celulares y smartphones",
-                         "💻 Laptops y computadoras",
-                         "📺 Televisores y audio",
-                         "🎮 Videojuegos",
-                         "🏠 Electrodomesticos"]
-        },
-        {
-            "pregunta": "¿Para que usas mas las alertas de DropNode MX?",
-            "opciones": ["Para compra personal",
-                         "Para revender (flipping)",
-                         "Para regalar",
-                         "Solo estoy viendo como funciona"]
-        },
-        {
-            "pregunta": "¿Que tienda prefieres para comprar tech?",
-            "opciones": ["Amazon MX", "Mercado Libre",
-                         "Liverpool", "Walmart MX", "Otra"]
-        },
-        {
-            "pregunta": "¿Con que presupuesto sueles comprar cuando hay una buena oferta?",
-            "opciones": ["Menos de $500 MXN",
-                         "$500 - $2,000 MXN",
-                         "$2,000 - $5,000 MXN",
-                         "Mas de $5,000 MXN"]
-        },
-    ]
-    return random.choice(polls)
+MENSAJES_VIERNES = [
+    "*Fin de semana DropNode MX*\n\nAlguien aprovecho alguna oferta esta semana?\n\nCuentanos: que compraste, a que precio y donde. La comunidad aprende de todos.\n\nLos mejores casos los destacamos en el canal.",
+    "*Esta semana compraste algo con nuestras alertas?*\n\nDinos que conseguiste. Precio, producto, donde.\n\nEso ayuda a toda la comunidad a entender que vale la pena.",
+    "*Viernes de resultados*\n\nQue tal estuvo la semana en ofertas?\n\nSi compraste algo bueno, comparte aqui. Si encontraste algo que no enviamos, tambien nos interesa saber.",
+]
 
-def mensaje_viernes():
-    """Viernes 5 PM — Social proof y comunidad."""
-    mensajes = [
-        ("¿Alguien aprovecho alguna oferta esta semana?\n\n"
-         "Comparte aqui tu compra — precio, producto y donde lo encontraste.\n"
-         "La comunidad aprende de todos."),
-        ("Fin de semana en DropNode MX\n\n"
-         "¿Cual fue la mejor oferta que encontraste esta semana?\n"
-         "Cuéntanos — eso ayuda a toda la comunidad."),
-        ("¿Compraste algo con nuestras alertas esta semana?\n\n"
-         "Dinos que conseguiste y a que precio.\n"
-         "Los mejores casos los destacamos en el canal."),
-    ]
-    return random.choice(mensajes)
+TIPS_DOMINGO = [
+    "*Tip DropNode - Como saber si un descuento es real*\n\nNo compares vs el precio tachado. Ese puede estar inflado.\n\nCompara vs el precio de hace 30-60 dias.\n\nNuestro equipo hace eso automaticamente. Un descuento real es cuando el precio actual esta por debajo de su historico, no solo por debajo del tachado.",
+    "*Tip DropNode - La hora de los errores de precio*\n\nLos errores de precio ocurren mas seguido entre 11 PM y 3 AM cuando los sistemas se actualizan.\n\nTambien los lunes por la manana y justo despues del Buen Fin.\n\nNuestro equipo monitorea 24 horas. El VIP recibe estas alertas en segundos.",
+    "*Tip DropNode - Que productos tienen mejor margen de reventa*\n\nEn orden para el mercado mexicano:\n1. iPhones y Samsung desbloqueados\n2. Consolas de videojuegos\n3. Laptops gaming\n4. Audifonos premium\n5. Smartwatches\n\nLa clave: comprar por debajo del precio de ML y revender ahi mismo con 15-25% de margen.",
+    "*Tip DropNode - Como no perder una oferta de stock limitado*\n\n1. Activa notificaciones del canal\n2. Cuando llegue la alerta: entra al link ANTES de leer el mensaje completo\n3. Agrega al carrito primero\n4. Si en 5 minutos no te convence, lo quitas\n\nEl stock en errores de precio se agota en minutos. La velocidad es la ventaja del VIP.",
+]
 
-def mensaje_domingo():
-    """Domingo 11 AM — Tip educativo."""
-    tips = [
-        ("*Tip DropNode MX — Como saber si un descuento es real*\n\n"
-         "El truco: no compares vs el precio tachado.\n"
-         "Ese precio puede estar inflado.\n\n"
-         "Compara vs el precio de hace 30-60 dias.\n"
-         "Nuestro equipo hace eso automaticamente para ti.\n\n"
-         "_Un descuento real es cuando el precio actual esta "
-         "por debajo de su historico, no solo por debajo del tachado._"),
-        ("*Tip DropNode MX — La hora de los errores de precio*\n\n"
-         "Los errores de precio en Mexico ocurren mas frecuentemente:\n"
-         "Entre 11 PM y 3 AM (actualizaciones de sistemas)\n"
-         "Lunes por la manana (carga masiva de catalogos)\n"
-         "Dias despues de el Buen Fin (liquidaciones reales)\n\n"
-         "_Nuestro equipo monitorea las 24 horas. "
-         "El canal VIP recibe estas alertas en segundos._"),
-        ("*Tip DropNode MX — Que productos tienen mejor margen de reventa*\n\n"
-         "En orden de rentabilidad para flipping en Mexico:\n"
-         "1. iPhones y smartphones desbloqueados\n"
-         "2. Consolas de videojuegos\n"
-         "3. Laptops gaming\n"
-         "4. Audifonos premium (AirPods, Sony, Bose)\n"
-         "5. Smartwatches\n\n"
-         "_La clave es comprar por debajo del precio de ML "
-         "y revender ahi mismo con 15-25% de margen._"),
-        ("*Tip DropNode MX — Como no perder una oferta de stock limitado*\n\n"
-         "1. Activa las notificaciones del canal\n"
-         "2. Cuando llegue la alerta, entra al link antes de leer el mensaje completo\n"
-         "3. Agrega al carrito primero, lee los detalles despues\n"
-         "4. Si en 5 minutos decides que no lo quieres, lo quitas del carrito\n\n"
-         "_El stock en errores de precio se agota en minutos. "
-         "La velocidad es la ventaja del canal VIP._"),
-    ]
-    return random.choice(tips)
+RECORDATORIOS_VIP = [
+    "*Canal VIP DropNode MX*\n\nLo que incluye:\n- Alertas en tiempo real (3 min antes que el canal free)\n- Analisis de precio historico de 90 dias\n- Estimacion de reventa\n- Alertas de stock critico\n- Cupones exclusivos\n\n$299 MXN/mes\n" + LAUNCHPASS_LINK,
+    "*Mientras lees esto...*\n\nLos miembros VIP ya recibieron las alertas de hoy con analisis completo.\n\nUn solo error de precio bien aprovechado paga la suscripcion del ano.\n\n" + LAUNCHPASS_LINK,
+    "*Por que pagar el VIP?*\n\nEl canal free recibe 3 alertas por run.\nEl VIP recibe hasta 8, con 3 minutos de ventaja.\n\nEn ofertas de stock limitado, 3 minutos es la diferencia entre comprar y llegar tarde.\n\n$299 MXN/mes - cancela cuando quieras\n" + LAUNCHPASS_LINK,
+]
 
-def recordatorio_vip_grupo():
-    """Recordatorio VIP sutil en el grupo — 2 veces por semana."""
-    mensajes = [
-        (f"*Canal VIP DropNode MX*\n\n"
-         f"Las alertas de errores de precio y stock critico "
-         f"llegan ahi primero.\n\n"
-         f"Los miembros del grupo que ya estan en VIP "
-         f"reciben las alertas con ventaja de tiempo.\n\n"
-         f"$299 MXN/mes\n{LAUNCHPASS_LINK}"),
-        (f"*¿Ya eres miembro VIP?*\n\n"
-         f"El canal VIP incluye:\n"
-         f"Alertas en tiempo real\n"
-         f"Analisis de reventa\n"
-         f"Reporte semanal exclusivo\n\n"
-         f"{LAUNCHPASS_LINK}"),
-    ]
-    return random.choice(mensajes)
-
-
-# ─────────────────────────────────────────────
-#  FUNCION PRINCIPAL — llamada desde main.py
-# ─────────────────────────────────────────────
 
 def ejecutar_community_manager():
-    """
-    Ejecuta el mensaje o poll correspondiente al dia y hora.
-    Llamar desde main.py cada hora para verificar si hay algo que publicar.
-    """
     ahora  = hora_mx()
-    dia    = ahora.weekday()   # 0=lunes, 6=domingo
+    dia    = ahora.weekday()
     hora   = ahora.hour
     minuto = ahora.minute
 
-    # Solo actuar en los primeros 15 minutos de la hora objetivo
     if minuto > 15:
         return
 
     publicado = False
 
-    # Lunes 10 AM — Peticion de productos
     if dia == 0 and hora == 10:
-        enviar_mensaje_grupo(mensaje_lunes())
+        msg = random.choice(MENSAJES_LUNES)
+        enviar_grupo(msg)
         publicado = True
+        logger.info("[COMMUNITY] Lunes - peticion de productos")
 
-    # Miercoles 6 PM — Poll de categoria
     elif dia == 2 and hora == 18:
-        p = poll_miercoles()
-        enviar_poll(GROUP_ID, p["pregunta"], p["opciones"])
+        p = random.choice(POLLS_MIERCOLES)
+        enviar_poll(p["pregunta"], p["opciones"])
         publicado = True
+        logger.info("[COMMUNITY] Miercoles - poll")
 
-    # Viernes 5 PM — Social proof
     elif dia == 4 and hora == 17:
-        enviar_mensaje_grupo(mensaje_viernes())
+        msg = random.choice(MENSAJES_VIERNES)
+        enviar_grupo(msg)
         publicado = True
+        logger.info("[COMMUNITY] Viernes - social proof")
 
-    # Domingo 11 AM — Tip educativo
     elif dia == 6 and hora == 11:
-        enviar_mensaje_grupo(mensaje_domingo())
+        msg = random.choice(TIPS_DOMINGO)
+        enviar_grupo(msg)
         publicado = True
+        logger.info("[COMMUNITY] Domingo - tip educativo")
 
-    # Martes y jueves 8 PM — Recordatorio VIP en el grupo
     elif dia in (1, 3) and hora == 20:
-        enviar_mensaje_grupo(recordatorio_vip_grupo())
-        publicado = True
+        if LAUNCHPASS_LINK:
+            msg = random.choice(RECORDATORIOS_VIP)
+            enviar_grupo(msg)
+            publicado = True
+            logger.info("[COMMUNITY] Recordatorio VIP en grupo")
 
     if publicado:
-        logger.info(f"[COMMUNITY] Mensaje publicado — dia={dia} hora={hora}h")
+        logger.info("[COMMUNITY] Mensaje enviado al grupo")
