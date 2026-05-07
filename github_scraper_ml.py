@@ -1,10 +1,10 @@
 # =============================================================
 
-# DROPNODE MX — github_scraper_ml.py  v4.0
+# DROPNODE MX – github_scraper_ml.py  v4.0
 
 # Usa Playwright (navegador headless) para ejecutar JavaScript
 
-# ML carga productos via React — necesitamos un navegador real
+# ML carga productos via React – necesitamos un navegador real
 
 # =============================================================
 
@@ -130,7 +130,7 @@ time.sleep(random.uniform(2, 4))  # Esperar carga adicional
 
                             const link = card.querySelector('a')?.href || '';
                             const img  = card.querySelector('img')?.src || '';
-                            const id   = card.getAttribute('data-id') || link.match(/MLM\d+/)?.[0] || '';
+                            const id   = card.getAttribute('data-id') || link.match(/MLM[0-9]+/)?.[0] || '';
 
                             if (titulo && precio > 0 && link) {
                                 resultados.push({
@@ -439,7 +439,7 @@ for item in alertas[:10]:
 if free_n==0 and hora_mx.hour in (12,19) and destacados:
     top=sorted(destacados,key=lambda x:x["score"],reverse=True)[:5]
     hl="tarde" if hora_mx.hour>=15 else "manana"
-    msg=f"📋 *Mejores precios de la {hl} — DropNode MX*\n\n"
+    msg=f"📋 *Mejores precios de la {hl} -- DropNode MX*\n\n"
     msg+="_Nuestro equipo reviso miles de productos. Estos destacan:_\n\n"
     for i,it in enumerate(top,1):
         lnk=link_ml(it["url"],it["id"]); d=it["descuento"]*100
@@ -451,7 +451,7 @@ if free_n==0 and hora_mx.hour in (12,19) and destacados:
         msg+=f"🔒 _Errores de precio van al VIP primero._\n_{LAUNCHPASS_LINK}_"
     enviar(CHANNEL_FREE_ID, msg); free_n+=1
 
-logger.info(f"[GITHUB] Fin — VIP:{vip_n} Free:{free_n} | "
+logger.info(f"[GITHUB] Fin -- VIP:{vip_n} Free:{free_n} | "
             f"Alertas:{len(alertas)} Destacados:{len(destacados)}")
 ```
 
