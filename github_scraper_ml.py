@@ -41,8 +41,8 @@ HORA_VIP_INICIO   = 7
 SCORE_EXCLUSIVO_VIP = 7
 SCORE_MIN_FREE      = 5
 DESCUENTO_HOT       = 0.40
-MAX_VIP_POR_RUN     = 8
-MAX_FREE_POR_RUN    = 3
+MAX_VIP_POR_RUN     = 12
+MAX_FREE_POR_RUN    = 4
 VENTAJA_MINUTOS     = 3
 
 PAGINAS = [
@@ -52,6 +52,8 @@ PAGINAS = [
     {"url": "https://www.mercadolibre.com.mx/ofertas?page=4", "nombre": "Ofertas p4", "emoji": "🔥"},
     {"url": "https://www.mercadolibre.com.mx/ofertas?page=5", "nombre": "Ofertas p5", "emoji": "🔥"},
     {"url": "https://www.mercadolibre.com.mx/ofertas?page=6", "nombre": "Ofertas p6", "emoji": "🔥"},
+    {"url": "https://www.mercadolibre.com.mx/ofertas?page=7", "nombre": "Ofertas p7", "emoji": "🔥"},
+    {"url": "https://www.mercadolibre.com.mx/ofertas?page=8", "nombre": "Ofertas p8", "emoji": "🔥"},
 ]
 
 USER_AGENTS = [
@@ -64,32 +66,75 @@ JS_EXTRACT = """
     var productos = [];
     var cards = document.querySelectorAll('.poly-card');
     if (cards.length === 0) cards = document.querySelectorAll('.andes-card');
+
+    function parsearPrecioML(card, selector) {
+        // ML muestra precios con fraccion y centavos separados
+        // Ej: <span class="fraction">298</span><span class="cents">80</span>
+        // Hay que leerlos por separado para no confundir $298.80 con $29,880
+        var fraccionEl = card.querySelector(
+            '[class*="price__fraction"], [class*="amount__fraction"], [class*="price-tag-fraction"]'
+        );
+        if (fraccionEl) {
+            var fraccionTxt = fraccionEl.textContent.replace(/[^0-9]/g, "");
+            var centavosEl = card.querySelector(
+                '[class*="price__cents"], [class*="amount__cents"], [class*="price-tag-cents"]'
+            );
+            var centavosTxt = centavosEl ? centavosEl.textContent.replace(/[^0-9]/g, "").substring(0, 2) : "00";
+            if (fraccionTxt) {
+                return parseFloat(fraccionTxt + "." + centavosTxt);
+            }
+        }
+        // Fallback: buscar en elementos de precio pero separar fraccion de centavos
+        var priceEls = card.querySelectorAll('[class*="price"], [class*="amount"]');
+        for (var pi = 0; pi < priceEls.length; pi++) {
+            // Obtener solo el texto directo del elemento (sin hijos)
+            var childNodes = priceEls[pi].childNodes;
+            var textoDirecto = "";
+            for (var ni = 0; ni < childNodes.length; ni++) {
+                if (childNodes[ni].nodeType === 3) {
+                    textoDirecto += childNodes[ni].textContent;
+                }
+            }
+            var numeros = textoDirecto.replace(/[^0-9.,]/g, "").trim();
+            if (numeros.length >= 2 && numeros.length <= 10) {
+                // Convertir formato mexicano: 1,299.00 o 1299
+                numeros = numeros.replace(/,([0-9]{3})/g, "$1").replace(",", ".");
+                var p = parseFloat(numeros);
+                if (p > 10 && p < 500000) return p;
+            }
+        }
+        return 0;
+    }
+
     for (var i = 0; i < cards.length; i++) {
         try {
             var card = cards[i];
             var tituloEl = card.querySelector('[class*="title"], h2, h3');
             var titulo = tituloEl ? tituloEl.textContent.trim() : "";
-            var precio = 0;
-            var precioEls = card.querySelectorAll('[class*="price"], [class*="amount"]');
-            for (var pi = 0; pi < precioEls.length; pi++) {
-                var txt = precioEls[pi].textContent.replace(/[^0-9]/g, "");
-                if (txt.length >= 2 && txt.length <= 7) {
-                    var p = parseFloat(txt);
-                    if (p > 50 && p < 999999) { precio = p; break; }
-                }
-            }
-            var origEl = card.querySelector('s, del, [class*="original"]');
+
+            var precio = parsearPrecioML(card, '[class*="price"]');
+
+            // Precio original (tachado)
+            var origEl = card.querySelector('s, del, [class*="original"], [class*="regular-price"]');
             var orig = 0;
             if (origEl) {
-                var ot = origEl.textContent.replace(/[^0-9]/g, "");
-                if (ot.length >= 2) orig = parseFloat(ot);
+                var origFracEl = origEl.querySelector('[class*="fraction"]');
+                if (origFracEl) {
+                    var origFrac = origFracEl.textContent.replace(/[^0-9]/g, "");
+                    if (origFrac) orig = parseFloat(origFrac);
+                } else {
+                    var ot = origEl.textContent.replace(/[^0-9.,]/g, "").replace(/,([0-9]{3})/g, "$1");
+                    if (ot.length >= 2 && ot.length <= 8) orig = parseFloat(ot);
+                }
             }
+
             var linkEl = card.querySelector("a[href]");
             var link = linkEl ? linkEl.href : "";
             var imgEl = card.querySelector("img");
             var img = imgEl ? (imgEl.src || imgEl.getAttribute("data-src") || "") : "";
             var idm = link.match(/MLM[0-9]+/);
             var id = idm ? idm[0] : ("item_" + i);
+
             var cardHtml = card.innerHTML.toLowerCase();
             var tieneCupon = cardHtml.indexOf("cup") >= 0 && cardHtml.indexOf("descuento") >= 0;
             var cuponMonto = 0;
@@ -97,10 +142,12 @@ JS_EXTRACT = """
                 var cm = cardHtml.match(/cup[^0-9]*([0-9]{2,5})/);
                 if (cm) cuponMonto = parseFloat(cm[1]);
             }
-            if (titulo && titulo.length > 5 && precio > 50 && link.includes("mercadolibre")) {
+
+            if (titulo && titulo.length > 5 && precio > 10 && link.includes("mercadolibre")) {
                 productos.push({
                     id: id, title: titulo.substring(0, 100),
-                    price: precio, original_price: orig > precio ? orig : 0,
+                    price: precio,
+                    original_price: (orig > precio && orig < precio * 10) ? orig : 0,
                     permalink: link, thumbnail: img, available_quantity: 10,
                     tiene_cupon: tieneCupon, cupon_monto: cuponMonto,
                     precio_con_cupon: cuponMonto > 0 ? precio - cuponMonto : precio
@@ -222,18 +269,21 @@ def tg_foto_mas_analisis(chat_id, photo_url, caption_corto, analisis):
 # ── Formateo de mensajes ──────────────────────────────────────
 
 def link_ml(url, item_id):
-    # Formato correcto ML Afiliados Mexico: parametro matt_tool directo
-    separador = "&" if "?" in url else "?"
-    return url + separador + "matt_tool=" + ML_AFFILIATE_ID + "&matt_word=dropnodemx&matt_content=" + str(item_id)
+    # Limpiar URL: quitar todo despues de ? o # para evitar URLs gigantes
+    # que rompen el Markdown de Telegram
+    url_limpia = url.split("?")[0].split("#")[0]
+    # Solo agregar el parametro de afiliado
+    return url_limpia + "?matt_tool=" + ML_AFFILIATE_ID
 
 
 def calcular_score(descuento, stock, precio, tiene_cupon):
     s = 0.0
-    if descuento >= 0.60: s += 3.5
-    elif descuento >= 0.40: s += 3.0
-    elif descuento >= 0.25: s += 2.0
-    elif descuento >= 0.10: s += 1.2
-    else: s += 0.3
+    if descuento >= 0.60: s += 4.0
+    elif descuento >= 0.40: s += 3.5
+    elif descuento >= 0.25: s += 3.0
+    elif descuento >= 0.15: s += 2.0
+    elif descuento >= 0.05: s += 1.0
+    else: s += 0.2
     if stock == 1: s += 2.0
     elif stock <= 3: s += 1.8
     elif stock <= 10: s += 1.0
@@ -379,6 +429,9 @@ def procesar(prod_raw):
         c_monto = float(prod_raw.get("cupon_monto", 0))
         p_cupon = float(prod_raw.get("precio_con_cupon", precio))
         if not nombre or precio <= 0 or not link:
+            return None
+        # Validar precio razonable (entre $10 y $200,000 MXN)
+        if precio > 200000 or precio < 10:
             return None
         descuento = 0.0
         if p_orig and p_orig > precio:
