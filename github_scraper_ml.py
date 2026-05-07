@@ -41,54 +41,157 @@ PAGINAS = [
 ]
 
 USER_AGENTS = [
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/124.0.0.0 Safari/537.36",
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
 ]
 
+# Script de extraccion con diagnostico y multiples estrategias
 JS_EXTRACT = """
 () => {
-    var res = [];
-    var cards = document.querySelectorAll('li.ui-search-layout__item');
-    if (cards.length === 0) {
-        cards = document.querySelectorAll('.andes-card');
+    var info = {
+        title: document.title,
+        url: window.location.href,
+        bodyLength: document.body ? document.body.innerHTML.length : 0,
+        selectors: {}
+    };
+
+    // Diagnostico: contar elementos por selector
+    var testSelectors = [
+        'li.ui-search-layout__item',
+        '.ui-search-layout__item',
+        '[class*="ui-search-layout"]',
+        '.poly-card',
+        '[class*="poly-card"]',
+        '.andes-card',
+        'article',
+        '[data-testid*="product"]',
+        '[data-testid*="result"]',
+        '.promotion-item',
+        '[class*="result"]',
+        '[class*="item--"]',
+        'li[class]',
+        '.ui-search-results li'
+    ];
+
+    for (var si = 0; si < testSelectors.length; si++) {
+        var count = document.querySelectorAll(testSelectors[si]).length;
+        if (count > 0) {
+            info.selectors[testSelectors[si]] = count;
+        }
     }
-    for (var i = 0; i < cards.length; i++) {
-        try {
-            var c = cards[i];
-            var t = c.querySelector('[class*="title"], h2');
-            var titulo = t ? t.textContent.trim() : "";
-            var pe = c.querySelector('[class*="price__fraction"], [class*="price-tag-fraction"]');
-            var precio = pe ? parseFloat(pe.textContent.replace(/[^0-9]/g, "")) : 0;
-            var oe = c.querySelector('s, [class*="original"]');
-            var orig = oe ? parseFloat(oe.textContent.replace(/[^0-9]/g, "")) : 0;
-            var ae = c.querySelector("a");
-            var link = ae ? ae.href : "";
-            var ie = c.querySelector("img");
-            var img = ie ? (ie.src || ie.getAttribute("data-src") || "") : "";
-            var matches = link.match(/MLM[0-9]+/);
-            var id = matches ? matches[0] : ("item_" + i);
-            if (titulo && precio > 0 && link) {
-                res.push({id: id, title: titulo, price: precio,
-                          original_price: orig > precio ? orig : 0,
-                          permalink: link, thumbnail: img, available_quantity: 10});
-            }
-        } catch(e) {}
+
+    // Intentar extraer con el selector que tenga mas elementos
+    var bestSelector = null;
+    var bestCount = 0;
+    var selectorKeys = Object.keys(info.selectors);
+    for (var ki = 0; ki < selectorKeys.length; ki++) {
+        var key = selectorKeys[ki];
+        if (info.selectors[key] > bestCount) {
+            bestCount = info.selectors[key];
+            bestSelector = key;
+        }
     }
-    return res;
+
+    var productos = [];
+    if (bestSelector) {
+        var cards = document.querySelectorAll(bestSelector);
+        for (var ci = 0; ci < Math.min(cards.length, 30); ci++) {
+            try {
+                var card = cards[ci];
+                var html = card.innerHTML;
+
+                // Extraer precio - buscar numeros grandes en el HTML
+                var precioMatch = html.match(/(\d{2,6})(?:,(\d{2,3}))?(?:\s*<\/span>|\s*MXN)/);
+                var precio = 0;
+                if (precioMatch) {
+                    precio = parseFloat(precioMatch[1].replace(/,/g, "") + (precioMatch[2] ? "." + precioMatch[2] : ""));
+                }
+
+                // Buscar en texto de elementos de precio conocidos
+                var precioEls = card.querySelectorAll('[class*="price"], [class*="precio"], [class*="amount"]');
+                for (var pi = 0; pi < precioEls.length; pi++) {
+                    var txt = precioEls[pi].textContent.replace(/[^0-9]/g, "");
+                    if (txt.length >= 3 && txt.length <= 7) {
+                        var p = parseFloat(txt);
+                        if (p > 50 && p < 999999) {
+                            precio = p;
+                            break;
+                        }
+                    }
+                }
+
+                // Titulo
+                var tituloEl = card.querySelector('[class*="title"], h2, h3, [class*="name"]');
+                var titulo = tituloEl ? tituloEl.textContent.trim() : "";
+
+                // Precio original (tachado)
+                var origEl = card.querySelector('s, del, [class*="original"], [class*="regular"], [class*="before"]');
+                var orig = 0;
+                if (origEl) {
+                    var origTxt = origEl.textContent.replace(/[^0-9]/g, "");
+                    if (origTxt.length >= 3) {
+                        orig = parseFloat(origTxt);
+                    }
+                }
+
+                // Link
+                var linkEl = card.querySelector("a[href]");
+                var link = linkEl ? linkEl.href : "";
+
+                // Imagen
+                var imgEl = card.querySelector("img");
+                var img = imgEl ? (imgEl.src || imgEl.getAttribute("data-src") || "") : "";
+
+                // ID
+                var idMatch = link.match(/MLM[0-9]+/);
+                var id = idMatch ? idMatch[0] : ("item_" + ci);
+
+                if (titulo && titulo.length > 5 && precio > 50 && link && link.includes("mercadolibre")) {
+                    productos.push({
+                        id: id,
+                        title: titulo.substring(0, 100),
+                        price: precio,
+                        original_price: orig > precio ? orig : 0,
+                        permalink: link,
+                        thumbnail: img,
+                        available_quantity: 10
+                    });
+                }
+            } catch (e) {}
+        }
+    }
+
+    return {diagnostico: info, productos: productos};
 }
 """
 
 
 def scrape_pagina(page, pagina):
+    productos = []
     try:
-        logger.info("[PW] " + pagina["nombre"])
-        page.goto(pagina["url"], wait_until="networkidle", timeout=30000)
-        time.sleep(random.uniform(3, 5))
-        items = page.evaluate(JS_EXTRACT)
-        logger.info("[PW] " + pagina["nombre"] + ": " + str(len(items)) + " productos")
-        return items or []
+        logger.info("[PW] Cargando: " + pagina["nombre"])
+        page.goto(pagina["url"], wait_until="domcontentloaded", timeout=30000)
+        # Esperar que cargue contenido dinamico
+        time.sleep(random.uniform(5, 8))
+
+        resultado = page.evaluate(JS_EXTRACT)
+
+        # Mostrar diagnostico
+        diag = resultado.get("diagnostico", {})
+        logger.info("[PW] Titulo: " + str(diag.get("title", "?"))[:60])
+        logger.info("[PW] HTML length: " + str(diag.get("bodyLength", 0)))
+        selectores = diag.get("selectors", {})
+        if selectores:
+            logger.info("[PW] Selectores encontrados: " + str(selectores))
+        else:
+            logger.warning("[PW] NINGUN selector encontro elementos - posible CAPTCHA o bloqueo")
+
+        prods = resultado.get("productos", [])
+        logger.info("[PW] " + pagina["nombre"] + ": " + str(len(prods)) + " productos")
+        return prods
+
     except Exception as e:
-        logger.error("[PW] " + str(e))
+        logger.error("[PW] Error en " + pagina["nombre"] + ": " + str(e))
         return []
 
 
@@ -232,7 +335,6 @@ def msg_vip(item):
     emoji = item["categoria"]["emoji"]
     cat = item["categoria"]["nombre"]
     hora = datetime.now(TZ_MEXICO).strftime("%H:%M:%S")
-
     if score >= 8:
         icono = "🚨"
         etiqueta = "ERROR DE PRECIO"
@@ -242,7 +344,6 @@ def msg_vip(item):
     else:
         icono = "⚡"
         etiqueta = "DESCUENTO REAL"
-
     if stock == 1:
         stock_txt = "*ULTIMA UNIDAD*"
     elif stock <= 3:
@@ -251,10 +352,8 @@ def msg_vip(item):
         stock_txt = str(stock) + " unidades"
     else:
         stock_txt = "Stock disponible"
-
     rl = precio_orig * 0.80
     rh = precio_orig * 0.92
-
     m = icono + " *" + etiqueta + "*  " + emoji + " " + cat + "\n\n"
     m += "*" + nombre + "*\n\n"
     m += "Precio ahora:    *$" + "{:,.0f}".format(precio) + " MXN*\n"
@@ -284,14 +383,12 @@ def msg_free(item):
     stats = item.get("stats", {})
     emoji = item["categoria"]["emoji"]
     score = item["score"]
-
     if score >= 8:
         icono = "🚨"
     elif score >= 6:
         icono = "🔥"
     else:
         icono = "⚡"
-
     m = icono + " *DESCUENTO REAL*  " + emoji + "\n\n"
     m += "*" + nombre + "*\n\n"
     m += "*$" + "{:,.0f}".format(precio) + " MXN* (-" + "{:.0f}".format(desc) + "%)\n"
@@ -317,16 +414,12 @@ def procesar(prod_raw, categoria):
         permalink = str(prod_raw.get("permalink", ""))
         stock = int(prod_raw.get("available_quantity", 10))
         thumb = str(prod_raw.get("thumbnail", ""))
-
         if not nombre or precio <= 0 or not permalink:
             return None
-
         pid = upsert_prod(permalink, nombre, categoria["nombre"], item_id)
         guardar_precio(pid, precio, precio_o or precio, stock)
-
         if alerta_hoy(pid):
             return None
-
         descuento = 0.0
         if precio_o and precio_o > precio:
             descuento = (precio_o - precio) / precio_o
@@ -335,10 +428,8 @@ def procesar(prod_raw, categoria):
             if minimo and precio < minimo * 0.88:
                 descuento = (minimo - precio) / minimo
                 precio_o = minimo
-
         score = calcular_score(descuento, stock, precio)
         stats = get_stats(pid, precio)
-
         return {
             "id": item_id, "pid": pid, "nombre": nombre,
             "precio": precio, "precio_orig": precio_o or precio,
@@ -352,8 +443,7 @@ def procesar(prod_raw, categoria):
 
 def main():
     hora_mx = datetime.now(TZ_MEXICO)
-    logger.info("[GITHUB v4] " + hora_mx.strftime("%d/%m %H:%M") + " MX")
-
+    logger.info("[GITHUB v4.1] " + hora_mx.strftime("%d/%m %H:%M") + " MX")
     if not (8 <= hora_mx.hour < 22):
         logger.info("[GITHUB] Fuera de horario")
         return
@@ -365,22 +455,27 @@ def main():
         browser = pw.chromium.launch(
             headless=True,
             args=["--no-sandbox", "--disable-setuid-sandbox",
-                  "--disable-dev-shm-usage", "--disable-gpu"]
+                  "--disable-dev-shm-usage", "--disable-gpu",
+                  "--window-size=1366,768"]
         )
         context = browser.new_context(
             user_agent=random.choice(USER_AGENTS),
             locale="es-MX",
             timezone_id="America/Mexico_City",
-            viewport={"width": 1366, "height": 768}
+            viewport={"width": 1366, "height": 768},
+            extra_http_headers={
+                "Accept-Language": "es-MX,es;q=0.9",
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+            }
         )
         page = context.new_page()
 
-        for pagina in PAGINAS:
+        # Solo procesar primera pagina para diagnostico
+        for pagina in PAGINAS[:2]:
             prods_raw = scrape_pagina(page, pagina)
             cat = {"nombre": pagina["nombre"], "emoji": pagina["emoji"]}
             mejor = None
             mejor_sc = -1
-
             for prod_raw in prods_raw[:25]:
                 item = procesar(prod_raw, cat)
                 if not item:
@@ -390,10 +485,29 @@ def main():
                     mejor = item
                 if item["descuento"] >= UMBRAL_FREE:
                     alertas.append(item)
-
             if mejor:
                 destacados.append(mejor)
-            time.sleep(random.uniform(2, 4))
+            time.sleep(random.uniform(3, 5))
+
+        # Si primer intento funciono, procesar el resto
+        if len(alertas) > 0 or len(destacados) > 0:
+            for pagina in PAGINAS[2:]:
+                prods_raw = scrape_pagina(page, pagina)
+                cat = {"nombre": pagina["nombre"], "emoji": pagina["emoji"]}
+                mejor = None
+                mejor_sc = -1
+                for prod_raw in prods_raw[:25]:
+                    item = procesar(prod_raw, cat)
+                    if not item:
+                        continue
+                    if item["score"] > mejor_sc:
+                        mejor_sc = item["score"]
+                        mejor = item
+                    if item["descuento"] >= UMBRAL_FREE:
+                        alertas.append(item)
+                if mejor:
+                    destacados.append(mejor)
+                time.sleep(random.uniform(3, 5))
 
         browser.close()
 
@@ -419,7 +533,6 @@ def main():
                     except Exception:
                         pass
                 time.sleep(4)
-
         if item["descuento"] >= UMBRAL_FREE and item["score"] >= 3:
             mid = enviar(CHANNEL_FREE_ID, msg_free(item))
             if mid:
