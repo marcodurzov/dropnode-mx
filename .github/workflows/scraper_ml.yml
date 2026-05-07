@@ -23,11 +23,13 @@ jobs:
           python-version: '3.11'
 
       - name: Install dependencies
-        run: pip install requests supabase==1.2.0 beautifulsoup4 lxml
+        run: |
+          pip install requests supabase==1.2.0 playwright
+          playwright install chromium
+          playwright install-deps chromium
 
       - name: Run ML scraper
         env:
-          SCRAPER_API_KEY: ${{ secrets.SCRAPER_API_KEY }}
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
@@ -39,4 +41,5 @@ jobs:
           AMAZON_TAG: ${{ secrets.AMAZON_TAG }}
           LAUNCHPASS_LINK: ${{ secrets.LAUNCHPASS_LINK }}
           MAKE_WEBHOOK_URL: ${{ secrets.MAKE_WEBHOOK_URL }}
+          SCRAPER_API_KEY: ${{ secrets.SCRAPER_API_KEY }}
         run: python github_scraper_ml.py
