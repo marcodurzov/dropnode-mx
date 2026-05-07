@@ -45,7 +45,8 @@ MAX_VIP_POR_RUN     = 12
 MAX_FREE_POR_RUN    = 4
 VENTAJA_MINUTOS     = 3
 
-PAGINAS = [
+# Paginas base (siempre)
+PAGINAS_BASE = [
     {"url": "https://www.mercadolibre.com.mx/ofertas",        "nombre": "Ofertas p1", "emoji": "🔥"},
     {"url": "https://www.mercadolibre.com.mx/ofertas?page=2", "nombre": "Ofertas p2", "emoji": "🔥"},
     {"url": "https://www.mercadolibre.com.mx/ofertas?page=3", "nombre": "Ofertas p3", "emoji": "🔥"},
@@ -55,6 +56,26 @@ PAGINAS = [
     {"url": "https://www.mercadolibre.com.mx/ofertas?page=7", "nombre": "Ofertas p7", "emoji": "🔥"},
     {"url": "https://www.mercadolibre.com.mx/ofertas?page=8", "nombre": "Ofertas p8", "emoji": "🔥"},
 ]
+
+# Paginas por categoria (rotan, 2 por run para no alargar demasiado)
+PAGINAS_CATEGORIA = [
+    {"url": "https://www.mercadolibre.com.mx/ofertas/electronica", "nombre": "Electronica", "emoji": "🔌"},
+    {"url": "https://www.mercadolibre.com.mx/ofertas/celulares",   "nombre": "Celulares",   "emoji": "📱"},
+    {"url": "https://www.mercadolibre.com.mx/ofertas/computacion", "nombre": "Computacion", "emoji": "💻"},
+    {"url": "https://www.mercadolibre.com.mx/ofertas/juguetes",    "nombre": "Juguetes",    "emoji": "🧸"},
+    {"url": "https://www.mercadolibre.com.mx/ofertas/bebes",       "nombre": "Bebes",       "emoji": "👶"},
+    {"url": "https://www.mercadolibre.com.mx/ofertas/mascotas",    "nombre": "Mascotas",    "emoji": "🐾"},
+    {"url": "https://www.mercadolibre.com.mx/ofertas/deportes",    "nombre": "Deportes",    "emoji": "⚽"},
+    {"url": "https://www.mercadolibre.com.mx/ofertas/hogar",       "nombre": "Hogar",       "emoji": "🏠"},
+    {"url": "https://www.mercadolibre.com.mx/ofertas/ropa",        "nombre": "Moda",        "emoji": "👗"},
+    {"url": "https://www.mercadolibre.com.mx/ofertas/herramientas","nombre": "Herramientas","emoji": "🔧"},
+]
+
+import datetime as _dt
+# Seleccionar 2 categorias distintas por run basado en la hora
+_hora_run = _dt.datetime.utcnow().hour
+PAGINAS_HOY = PAGINAS_BASE + PAGINAS_CATEGORIA[(_hora_run // 2) % len(PAGINAS_CATEGORIA) : (_hora_run // 2) % len(PAGINAS_CATEGORIA) + 2]
+PAGINAS = PAGINAS_HOY
 
 USER_AGENTS = [
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
