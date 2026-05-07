@@ -34,6 +34,24 @@ try:
 except Exception as e:
     logger.warning("[DB] Sin historial: " + str(e))
 
+def upsert_prod(url, nombre, categoria, sku):
+    """Inserta o actualiza producto y retorna su UUID."""
+    if not db:
+        return None
+    try:
+        r = db.table("productos").upsert(
+            {"url": url, "tienda": "mercadolibre", "nombre": nombre,
+             "categoria": categoria, "sku": sku, "activo": True},
+            on_conflict="sku,tienda"
+        ).execute()
+        if r.data:
+            return r.data[0]["id"]
+        r2 = db.table("productos").select("id").eq("sku", sku).eq("tienda", "mercadolibre").execute()
+        return r2.data[0]["id"] if r2.data else None
+    except Exception as e:
+        logger.error("[DB upsert] " + str(e))
+        return None
+
 HORA_FREE_INICIO  = 8
 HORA_FREE_FIN     = 23
 HORA_VIP_INICIO   = 7
@@ -194,36 +212,39 @@ def scrape_pagina(page, pagina):
         return []
 
 
-def alerta_hoy_db(item_id):
-    if not db:
+def alerta_hoy_db(pid):
+    """Verifica si ya se envio alerta hoy para este producto. pid = UUID."""
+    if not pid or not db:
         return False
     try:
         desde = datetime.utcnow().replace(hour=0, minute=0, second=0).isoformat()
-        r = db.table("alertas_enviadas").select("id").eq("producto_id", item_id).gte("timestamp", desde).execute()
+        r = db.table("alertas_enviadas").select("id").eq("producto_id", pid).gte("timestamp", desde).execute()
         return len(r.data) > 0
     except Exception:
         return False
 
 
-def guardar_alerta_db(item_id, score, canal, precio, descuento):
-    if not db:
+def guardar_alerta_db(pid, score, canal, precio, descuento):
+    """Guarda alerta enviada. pid = UUID de productos."""
+    if not pid or not db:
         return
     try:
         db.table("alertas_enviadas").insert({
-            "producto_id": item_id, "heat_score": score, "canal": canal,
+            "producto_id": pid, "heat_score": score, "canal": canal,
             "precio_alerta": precio, "descuento_real": descuento,
             "clicks": 0, "timestamp": datetime.utcnow().isoformat()
         }).execute()
-    except Exception:
-        pass
+    except Exception as e:
+        logger.error("[DB alerta] " + str(e)[:60])
 
 
-def get_stats_db(item_id, precio_actual):
-    if not db:
+def get_stats_db(pid, precio_actual):
+    """Obtiene estadisticas de precio historico. pid = UUID de productos."""
+    if not pid or not db:
         return {}
     try:
         desde = (datetime.utcnow() - timedelta(days=90)).isoformat()
-        r = db.table("historial_precios").select("precio, timestamp").eq("producto_id", item_id).gte("timestamp", desde).order("timestamp").execute()
+        r = db.table("historial_precios").select("precio, timestamp").eq("producto_id", pid).gte("timestamp", desde).order("timestamp").execute()
         regs = r.data or []
         if len(regs) < 5:
             return {}
@@ -507,10 +528,11 @@ def main():
             time.sleep(random.uniform(2, 4))
         browser.close()
 
+    # Deduplicar por ID (alerta_hoy_db ya se verifico en procesar())
     seen  = set()
     unicos = []
     for a in todos:
-        if a["id"] not in seen and not alerta_hoy_db(a["id"]):
+        if a and a["id"] not in seen:
             seen.add(a["id"])
             unicos.append(a)
     unicos.sort(key=lambda x: x["score"], reverse=True)
@@ -537,7 +559,7 @@ def main():
 
         mid = tg_foto_mas_analisis(CHANNEL_VIP_ID, thumb, cap, anal)
         if mid:
-            guardar_alerta_db(item["id"], item["score"], "vip", item["precio"], item["descuento"])
+            guardar_alerta_db(item.get("pid"), item["score"], "vip", item["precio"], item["descuento"])
             ids_vip.add(item["id"])
             vip_n += 1
             if item["score"] >= 8 and MAKE_WEBHOOK_URL:
