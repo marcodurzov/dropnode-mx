@@ -15,14 +15,16 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-SUPABASE_URL    = os.environ["SUPABASE_URL"]
-SUPABASE_KEY    = os.environ["SUPABASE_KEY"]
-TELEGRAM_TOKEN  = os.environ["TELEGRAM_TOKEN"]
-CHANNEL_FREE_ID = int(os.environ["CHANNEL_FREE_ID"])
-CHANNEL_VIP_ID  = int(os.environ["CHANNEL_VIP_ID"])
-ML_AFFILIATE_ID = os.environ.get("ML_AFFILIATE_ID", "marcodurzo")
-LAUNCHPASS_LINK = os.environ.get("LAUNCHPASS_LINK", "")
-MAKE_WEBHOOK_URL = os.environ.get("MAKE_WEBHOOK_URL", "")
+SUPABASE_URL    = os.environ["SUPABASE_URL"].strip()
+SUPABASE_KEY    = os.environ["SUPABASE_KEY"].strip()
+TELEGRAM_TOKEN  = os.environ["TELEGRAM_TOKEN"].strip()
+CHANNEL_FREE_ID = int(os.environ["CHANNEL_FREE_ID"].strip())
+CHANNEL_VIP_ID  = int(os.environ["CHANNEL_VIP_ID"].strip())
+ML_AFFILIATE_ID = os.environ.get("ML_AFFILIATE_ID", "marcodurzo").strip()
+LAUNCHPASS_LINK = os.environ.get("LAUNCHPASS_LINK", "").strip()
+MAKE_WEBHOOK_URL = os.environ.get("MAKE_WEBHOOK_URL", "").strip()
+
+logger.info("[CONFIG] SUPABASE_URL=" + SUPABASE_URL)
 
 TZ_MEXICO = timezone(timedelta(hours=-6))
 db = create_client(SUPABASE_URL, SUPABASE_KEY)
@@ -31,13 +33,14 @@ TELEGRAM_API = "https://api.telegram.org/bot" + TELEGRAM_TOKEN
 UMBRAL_VIP = 0.25
 UMBRAL_FREE = 0.12
 
+# Solo URLs que sabemos que funcionan con Playwright
 PAGINAS = [
     {"url": "https://www.mercadolibre.com.mx/ofertas", "nombre": "Ofertas", "emoji": "🔥"},
-    {"url": "https://listado.mercadolibre.com.mx/celulares-smartphones/", "nombre": "Celulares", "emoji": "📱"},
-    {"url": "https://listado.mercadolibre.com.mx/computacion/", "nombre": "Computacion", "emoji": "💻"},
-    {"url": "https://listado.mercadolibre.com.mx/electronica-audio-video/", "nombre": "Electronica", "emoji": "🔌"},
-    {"url": "https://listado.mercadolibre.com.mx/televisores/", "nombre": "Televisores", "emoji": "📺"},
-    {"url": "https://listado.mercadolibre.com.mx/videojuegos/", "nombre": "Videojuegos", "emoji": "🎮"},
+    {"url": "https://www.mercadolibre.com.mx/ofertas?page=2", "nombre": "Ofertas p2", "emoji": "🔥"},
+    {"url": "https://www.mercadolibre.com.mx/ofertas?page=3", "nombre": "Ofertas p3", "emoji": "🔥"},
+    {"url": "https://www.mercadolibre.com.mx/ofertas?page=4", "nombre": "Ofertas p4", "emoji": "🔥"},
+    {"url": "https://www.mercadolibre.com.mx/ofertas?page=5", "nombre": "Ofertas p5", "emoji": "🔥"},
+    {"url": "https://www.mercadolibre.com.mx/ofertas?page=6", "nombre": "Ofertas p6", "emoji": "🔥"},
 ]
 
 USER_AGENTS = [
@@ -45,153 +48,63 @@ USER_AGENTS = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
 ]
 
-# Script de extraccion con diagnostico y multiples estrategias
 JS_EXTRACT = """
 () => {
-    var info = {
-        title: document.title,
-        url: window.location.href,
-        bodyLength: document.body ? document.body.innerHTML.length : 0,
-        selectors: {}
-    };
-
-    // Diagnostico: contar elementos por selector
-    var testSelectors = [
-        'li.ui-search-layout__item',
-        '.ui-search-layout__item',
-        '[class*="ui-search-layout"]',
-        '.poly-card',
-        '[class*="poly-card"]',
-        '.andes-card',
-        'article',
-        '[data-testid*="product"]',
-        '[data-testid*="result"]',
-        '.promotion-item',
-        '[class*="result"]',
-        '[class*="item--"]',
-        'li[class]',
-        '.ui-search-results li'
-    ];
-
-    for (var si = 0; si < testSelectors.length; si++) {
-        var count = document.querySelectorAll(testSelectors[si]).length;
-        if (count > 0) {
-            info.selectors[testSelectors[si]] = count;
-        }
-    }
-
-    // Intentar extraer con el selector que tenga mas elementos
-    var bestSelector = null;
-    var bestCount = 0;
-    var selectorKeys = Object.keys(info.selectors);
-    for (var ki = 0; ki < selectorKeys.length; ki++) {
-        var key = selectorKeys[ki];
-        if (info.selectors[key] > bestCount) {
-            bestCount = info.selectors[key];
-            bestSelector = key;
-        }
-    }
-
     var productos = [];
-    if (bestSelector) {
-        var cards = document.querySelectorAll(bestSelector);
-        for (var ci = 0; ci < Math.min(cards.length, 30); ci++) {
-            try {
-                var card = cards[ci];
-                var html = card.innerHTML;
-
-                // Extraer precio - buscar numeros grandes en el HTML
-                var precioMatch = html.match(/(\d{2,6})(?:,(\d{2,3}))?(?:\s*<\/span>|\s*MXN)/);
-                var precio = 0;
-                if (precioMatch) {
-                    precio = parseFloat(precioMatch[1].replace(/,/g, "") + (precioMatch[2] ? "." + precioMatch[2] : ""));
-                }
-
-                // Buscar en texto de elementos de precio conocidos
-                var precioEls = card.querySelectorAll('[class*="price"], [class*="precio"], [class*="amount"]');
-                for (var pi = 0; pi < precioEls.length; pi++) {
-                    var txt = precioEls[pi].textContent.replace(/[^0-9]/g, "");
-                    if (txt.length >= 3 && txt.length <= 7) {
-                        var p = parseFloat(txt);
-                        if (p > 50 && p < 999999) {
-                            precio = p;
-                            break;
-                        }
-                    }
-                }
-
-                // Titulo
-                var tituloEl = card.querySelector('[class*="title"], h2, h3, [class*="name"]');
-                var titulo = tituloEl ? tituloEl.textContent.trim() : "";
-
-                // Precio original (tachado)
-                var origEl = card.querySelector('s, del, [class*="original"], [class*="regular"], [class*="before"]');
-                var orig = 0;
-                if (origEl) {
-                    var origTxt = origEl.textContent.replace(/[^0-9]/g, "");
-                    if (origTxt.length >= 3) {
-                        orig = parseFloat(origTxt);
-                    }
-                }
-
-                // Link
-                var linkEl = card.querySelector("a[href]");
-                var link = linkEl ? linkEl.href : "";
-
-                // Imagen
-                var imgEl = card.querySelector("img");
-                var img = imgEl ? (imgEl.src || imgEl.getAttribute("data-src") || "") : "";
-
-                // ID
-                var idMatch = link.match(/MLM[0-9]+/);
-                var id = idMatch ? idMatch[0] : ("item_" + ci);
-
-                if (titulo && titulo.length > 5 && precio > 50 && link && link.includes("mercadolibre")) {
-                    productos.push({
-                        id: id,
-                        title: titulo.substring(0, 100),
-                        price: precio,
-                        original_price: orig > precio ? orig : 0,
-                        permalink: link,
-                        thumbnail: img,
-                        available_quantity: 10
-                    });
-                }
-            } catch (e) {}
-        }
+    var cards = document.querySelectorAll('.poly-card');
+    if (cards.length === 0) {
+        cards = document.querySelectorAll('.andes-card');
     }
-
-    return {diagnostico: info, productos: productos};
+    for (var i = 0; i < cards.length; i++) {
+        try {
+            var card = cards[i];
+            var tituloEl = card.querySelector('[class*="title"], h2, h3');
+            var titulo = tituloEl ? tituloEl.textContent.trim() : "";
+            var precioEls = card.querySelectorAll('[class*="price"], [class*="amount"]');
+            var precio = 0;
+            for (var pi = 0; pi < precioEls.length; pi++) {
+                var txt = precioEls[pi].textContent.replace(/[^0-9]/g, "");
+                if (txt.length >= 2 && txt.length <= 7) {
+                    var p = parseFloat(txt);
+                    if (p > 50 && p < 999999) { precio = p; break; }
+                }
+            }
+            var origEl = card.querySelector('s, del, [class*="original"]');
+            var orig = 0;
+            if (origEl) {
+                var ot = origEl.textContent.replace(/[^0-9]/g, "");
+                if (ot.length >= 2) orig = parseFloat(ot);
+            }
+            var linkEl = card.querySelector("a[href]");
+            var link = linkEl ? linkEl.href : "";
+            var imgEl = card.querySelector("img");
+            var img = imgEl ? (imgEl.src || imgEl.getAttribute("data-src") || "") : "";
+            var idm = link.match(/MLM[0-9]+/);
+            var id = idm ? idm[0] : ("item_" + i);
+            if (titulo && titulo.length > 5 && precio > 50 && link.includes("mercadolibre")) {
+                productos.push({
+                    id: id, title: titulo.substring(0, 100),
+                    price: precio, original_price: orig > precio ? orig : 0,
+                    permalink: link, thumbnail: img, available_quantity: 10
+                });
+            }
+        } catch (e) {}
+    }
+    return productos;
 }
 """
 
 
 def scrape_pagina(page, pagina):
-    productos = []
     try:
-        logger.info("[PW] Cargando: " + pagina["nombre"])
+        logger.info("[PW] " + pagina["url"])
         page.goto(pagina["url"], wait_until="domcontentloaded", timeout=30000)
-        # Esperar que cargue contenido dinamico
-        time.sleep(random.uniform(5, 8))
-
-        resultado = page.evaluate(JS_EXTRACT)
-
-        # Mostrar diagnostico
-        diag = resultado.get("diagnostico", {})
-        logger.info("[PW] Titulo: " + str(diag.get("title", "?"))[:60])
-        logger.info("[PW] HTML length: " + str(diag.get("bodyLength", 0)))
-        selectores = diag.get("selectors", {})
-        if selectores:
-            logger.info("[PW] Selectores encontrados: " + str(selectores))
-        else:
-            logger.warning("[PW] NINGUN selector encontro elementos - posible CAPTCHA o bloqueo")
-
-        prods = resultado.get("productos", [])
-        logger.info("[PW] " + pagina["nombre"] + ": " + str(len(prods)) + " productos")
-        return prods
-
+        time.sleep(random.uniform(4, 7))
+        items = page.evaluate(JS_EXTRACT)
+        logger.info("[PW] " + pagina["nombre"] + ": " + str(len(items)) + " productos")
+        return items or []
     except Exception as e:
-        logger.error("[PW] Error en " + pagina["nombre"] + ": " + str(e))
+        logger.error("[PW] " + str(e))
         return []
 
 
@@ -443,7 +356,7 @@ def procesar(prod_raw, categoria):
 
 def main():
     hora_mx = datetime.now(TZ_MEXICO)
-    logger.info("[GITHUB v4.1] " + hora_mx.strftime("%d/%m %H:%M") + " MX")
+    logger.info("[GITHUB v4.2] " + hora_mx.strftime("%d/%m %H:%M") + " MX")
     if not (8 <= hora_mx.hour < 22):
         logger.info("[GITHUB] Fuera de horario")
         return
@@ -455,28 +368,22 @@ def main():
         browser = pw.chromium.launch(
             headless=True,
             args=["--no-sandbox", "--disable-setuid-sandbox",
-                  "--disable-dev-shm-usage", "--disable-gpu",
-                  "--window-size=1366,768"]
+                  "--disable-dev-shm-usage", "--disable-gpu"]
         )
         context = browser.new_context(
             user_agent=random.choice(USER_AGENTS),
             locale="es-MX",
             timezone_id="America/Mexico_City",
-            viewport={"width": 1366, "height": 768},
-            extra_http_headers={
-                "Accept-Language": "es-MX,es;q=0.9",
-                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
-            }
+            viewport={"width": 1366, "height": 768}
         )
         page = context.new_page()
 
-        # Solo procesar primera pagina para diagnostico
-        for pagina in PAGINAS[:2]:
+        for pagina in PAGINAS:
             prods_raw = scrape_pagina(page, pagina)
-            cat = {"nombre": pagina["nombre"], "emoji": pagina["emoji"]}
+            cat = {"nombre": "ML Ofertas", "emoji": "🔥"}
             mejor = None
             mejor_sc = -1
-            for prod_raw in prods_raw[:25]:
+            for prod_raw in prods_raw:
                 item = procesar(prod_raw, cat)
                 if not item:
                     continue
@@ -487,35 +394,25 @@ def main():
                     alertas.append(item)
             if mejor:
                 destacados.append(mejor)
-            time.sleep(random.uniform(3, 5))
-
-        # Si primer intento funciono, procesar el resto
-        if len(alertas) > 0 or len(destacados) > 0:
-            for pagina in PAGINAS[2:]:
-                prods_raw = scrape_pagina(page, pagina)
-                cat = {"nombre": pagina["nombre"], "emoji": pagina["emoji"]}
-                mejor = None
-                mejor_sc = -1
-                for prod_raw in prods_raw[:25]:
-                    item = procesar(prod_raw, cat)
-                    if not item:
-                        continue
-                    if item["score"] > mejor_sc:
-                        mejor_sc = item["score"]
-                        mejor = item
-                    if item["descuento"] >= UMBRAL_FREE:
-                        alertas.append(item)
-                if mejor:
-                    destacados.append(mejor)
-                time.sleep(random.uniform(3, 5))
+            time.sleep(random.uniform(2, 4))
 
         browser.close()
 
-    alertas.sort(key=lambda x: x["score"], reverse=True)
+    # Deduplicar por ID
+    seen = set()
+    alertas_unicas = []
+    for a in alertas:
+        if a["id"] not in seen:
+            seen.add(a["id"])
+            alertas_unicas.append(a)
+    alertas = sorted(alertas_unicas, key=lambda x: x["score"], reverse=True)
+
+    logger.info("[GITHUB] Total alertas: " + str(len(alertas)))
+
     vip_n = 0
     free_n = 0
 
-    for item in alertas[:10]:
+    for item in alertas[:15]:
         if item["descuento"] >= UMBRAL_VIP and item["score"] >= 6:
             mid = enviar(CHANNEL_VIP_ID, msg_vip(item))
             if mid:
@@ -559,8 +456,7 @@ def main():
         enviar(CHANNEL_FREE_ID, msg)
         free_n += 1
 
-    logger.info("[GITHUB] Fin - VIP:" + str(vip_n) + " Free:" + str(free_n)
-                + " | Alertas:" + str(len(alertas)) + " Destacados:" + str(len(destacados)))
+    logger.info("[GITHUB] Fin - VIP:" + str(vip_n) + " Free:" + str(free_n))
 
 
 if __name__ == "__main__":
