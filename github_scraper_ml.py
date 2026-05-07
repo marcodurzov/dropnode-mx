@@ -1,10 +1,10 @@
 # =============================================================
-# DROPNODE MX — github_scraper_ml.py  v2.3
-# Usa ScraperAPI como proxy para evitar bloqueo de ML
-# Registro gratuito: scraperapi.com — 1000 llamadas/mes gratis
+# DROPNODE MX — github_scraper_ml.py  v3.0
+# Usa la pagina web de ML (no la API) — menos restrictiva
+# Extrae datos del JSON embebido en el HTML de ofertas
 # =============================================================
 
-import os, requests, time, random, logging, sys, urllib.parse
+import os, requests, time, random, logging, sys, json, re
 import urllib3
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 from datetime import datetime, timedelta, timezone
@@ -19,12 +19,9 @@ SUPABASE_KEY    = os.environ["SUPABASE_KEY"]
 TELEGRAM_TOKEN  = os.environ["TELEGRAM_TOKEN"]
 CHANNEL_FREE_ID = int(os.environ["CHANNEL_FREE_ID"])
 CHANNEL_VIP_ID  = int(os.environ["CHANNEL_VIP_ID"])
-ML_APP_ID       = os.environ["ML_APP_ID"]
-ML_SECRET       = os.environ["ML_SECRET"]
 ML_AFFILIATE_ID = os.environ.get("ML_AFFILIATE_ID", "marcodurzo")
 LAUNCHPASS_LINK = os.environ.get("LAUNCHPASS_LINK", "")
 MAKE_WEBHOOK_URL= os.environ.get("MAKE_WEBHOOK_URL", "")
-SCRAPER_API_KEY = os.environ.get("SCRAPER_API_KEY", "")  # scraperapi.com
 
 TZ_MEXICO = timezone(timedelta(hours=-6))
 db        = create_client(SUPABASE_URL, SUPABASE_KEY)
@@ -33,99 +30,134 @@ TELEGRAM  = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}"
 UMBRAL_VIP  = 0.30
 UMBRAL_FREE = 0.15
 
-CATEGORIAS = [
-    {"id": "MLM1051", "nombre": "Celulares",       "emoji": "📱"},
-    {"id": "MLM1648", "nombre": "Computacion",      "emoji": "💻"},
-    {"id": "MLM1000", "nombre": "Electronica",      "emoji": "🔌"},
-    {"id": "MLM1002", "nombre": "Televisores",      "emoji": "📺"},
-    {"id": "MLM1574", "nombre": "Electrodomesticos","emoji": "🏠"},
-    {"id": "MLM1144", "nombre": "Videojuegos",      "emoji": "🎮"},
+# Paginas de ofertas de ML — accesibles sin API key
+PAGINAS_OFERTAS = [
+    {"url": "https://www.mercadolibre.com.mx/ofertas#nav-header",
+     "nombre": "Ofertas destacadas", "emoji": "🔥"},
+    {"url": "https://www.mercadolibre.com.mx/c/celulares-y-telefonia",
+     "nombre": "Celulares", "emoji": "📱"},
+    {"url": "https://www.mercadolibre.com.mx/c/computacion",
+     "nombre": "Computacion", "emoji": "💻"},
+    {"url": "https://www.mercadolibre.com.mx/c/electronica-audio-y-video",
+     "nombre": "Electronica", "emoji": "🔌"},
+    {"url": "https://www.mercadolibre.com.mx/c/videojuegos",
+     "nombre": "Videojuegos", "emoji": "🎮"},
+    {"url": "https://www.mercadolibre.com.mx/c/electrodomesticos-y-aires-acondicionados",
+     "nombre": "Electrodomesticos", "emoji": "🏠"},
 ]
 
-_token = {"value": None, "expires": None}
+USER_AGENTS = [
+    "Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Mobile/15E148 Safari/604.1",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Linux; Android 14; Pixel 8 Pro) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36",
+]
 
-
-def get_token():
-    ahora = datetime.utcnow()
-    if _token["value"] and _token["expires"] and ahora < _token["expires"]:
-        return _token["value"]
-    try:
-        r = requests.post("https://api.mercadolibre.com/oauth/token", data={
-            "grant_type": "client_credentials",
-            "client_id": ML_APP_ID, "client_secret": ML_SECRET,
-        }, timeout=15)
-        if r.status_code == 200:
-            d = r.json()
-            _token["value"]   = d["access_token"]
-            _token["expires"] = ahora + timedelta(seconds=d.get("expires_in", 21600) - 300)
-            logger.info("[AUTH] Token ML OK")
-            return _token["value"]
-    except Exception as e:
-        logger.error(f"[AUTH] {e}")
-    return None
-
-
-def hacer_llamada_ml(url_ml: str, params: dict = None) -> dict | None:
-    """
-    Llama a la API de ML.
-    Si SCRAPER_API_KEY está configurado, enruta a través de ScraperAPI
-    para evitar el bloqueo 403 por IP de datacenter.
-    """
-    token = get_token()
-    headers = {
-        "Accept": "application/json",
-        "Accept-Language": "es-MX,es;q=0.9",
-        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) Chrome/122.0.0.0",
+def get_headers():
+    return {
+        "User-Agent":       random.choice(USER_AGENTS),
+        "Accept":           "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language":  "es-MX,es;q=0.9",
+        "Accept-Encoding":  "gzip, deflate, br",
+        "Connection":       "keep-alive",
+        "Upgrade-Insecure-Requests": "1",
+        "Sec-Fetch-Dest":   "document",
+        "Sec-Fetch-Mode":   "navigate",
+        "Sec-Fetch-Site":   "none",
     }
-    if token:
-        headers["Authorization"] = f"Bearer {token}"
 
-    # Construir URL completa con params
-    if params:
-        url_ml = url_ml + "?" + urllib.parse.urlencode(params)
+def esperar():
+    time.sleep(random.uniform(4, 9))
 
-    # Si hay ScraperAPI key, rutar a través de él
-    if SCRAPER_API_KEY:
-        # Modo proxy directo — ScraperAPI actua como proxy puro
-        # sin modificar el request/response (ideal para JSON APIs)
-        proxies = {
-            "http":  f"http://scraperapi:{SCRAPER_API_KEY}@proxy-server.scraperapi.com:8001",
-            "https": f"http://scraperapi:{SCRAPER_API_KEY}@proxy-server.scraperapi.com:8001",
-        }
+def extraer_productos_html(html: str) -> list:
+    """
+    Extrae datos de productos del JSON embebido en el HTML de ML.
+    ML embebe los datos de productos en window.__PRELOADED_STATE__
+    o en scripts de tipo application/json.
+    """
+    productos = []
+
+    # Patron 1: JSON en __PRELOADED_STATE__
+    match = re.search(
+        r'window\.__PRELOADED_STATE__\s*=\s*(\{.+?\});?\s*</script>',
+        html, re.DOTALL)
+    if match:
         try:
-            time.sleep(random.uniform(1, 3))
-            r = requests.get(url_ml, headers=headers,
-                             proxies=proxies, verify=False, timeout=90)
-            if r.status_code == 200:
-                return r.json()
-            logger.warning(f"[PROXY] HTTP {r.status_code}")
-        except Exception as e:
-            logger.error(f"[PROXY] {e}")
-        return None
-    else:
-        # Sin proxy — intento directo (puede dar 403 en datacenter)
+            data = json.loads(match.group(1))
+            items = (data.get("initialState", {})
+                        .get("results", []) or
+                     data.get("results", []))
+            productos.extend(items)
+        except Exception:
+            pass
+
+    # Patron 2: JSON en script con id="__next_data__" o similar
+    matches = re.findall(
+        r'<script[^>]*type="application/json"[^>]*>(\{.+?\})</script>',
+        html, re.DOTALL)
+    for m in matches:
         try:
-            time.sleep(random.uniform(3, 7))
-            r = requests.get(url_ml, headers=headers, timeout=15)
-            if r.status_code == 200:
-                return r.json()
-            logger.warning(f"[ML] HTTP {r.status_code}")
-        except Exception as e:
-            logger.error(f"[ML] {e}")
-        return None
+            data  = json.loads(m)
+            items = data.get("results", data.get("items", []))
+            if items and isinstance(items, list):
+                productos.extend(items)
+        except Exception:
+            pass
+
+    # Patron 3: Buscar precios directamente en HTML con regex
+    if not productos:
+        # Extraer datos basicos del HTML parseado
+        precios_raw = re.findall(
+            r'"price":\s*(\d+(?:\.\d+)?)',
+            html)
+        titulos_raw = re.findall(
+            r'"title":\s*"([^"]{10,100})"',
+            html)
+        urls_raw = re.findall(
+            r'"permalink":\s*"(https://www\.mercadolibre\.com\.mx/[^"]+)"',
+            html)
+        orig_raw = re.findall(
+            r'"original_price":\s*(\d+(?:\.\d+)?)',
+            html)
+        ids_raw = re.findall(
+            r'"id":\s*"(MLM\d+)"',
+            html)
+        thumbs_raw = re.findall(
+            r'"thumbnail":\s*"(https://[^"]+\.(?:jpg|png|webp)[^"]*)"',
+            html)
+
+        n = min(len(precios_raw), len(titulos_raw), len(urls_raw))
+        for i in range(n):
+            productos.append({
+                "id":             ids_raw[i] if i < len(ids_raw) else f"item_{i}",
+                "title":          titulos_raw[i],
+                "price":          float(precios_raw[i]),
+                "original_price": float(orig_raw[i]) if i < len(orig_raw) else None,
+                "permalink":      urls_raw[i],
+                "thumbnail":      thumbs_raw[i] if i < len(thumbs_raw) else "",
+                "available_quantity": 10,
+            })
+
+    return productos
 
 
-def buscar(cat_id, offset=0):
-    data = hacer_llamada_ml(
-        "https://api.mercadolibre.com/sites/MLM/search",
-        {"category": cat_id, "sort": "relevance",
-         "offset": offset, "limit": 50, "condition": "new"}
-    )
-    return data.get("results", []) if data else []
+def scrape_pagina(pagina: dict) -> list:
+    """Descarga y extrae productos de una pagina de ofertas de ML."""
+    esperar()
+    try:
+        resp = requests.get(pagina["url"], headers=get_headers(),
+                           timeout=30, allow_redirects=True)
+        if resp.status_code != 200:
+            logger.warning(f"[ML WEB] HTTP {resp.status_code} — {pagina['nombre']}")
+            return []
 
+        productos = extraer_productos_html(resp.text)
+        logger.info(f"[ML WEB] {pagina['nombre']}: {len(productos)} productos extraidos")
+        return productos
 
-def detalle(item_id):
-    return hacer_llamada_ml(f"https://api.mercadolibre.com/items/{item_id}")
+    except Exception as e:
+        logger.error(f"[ML WEB] {pagina['nombre']}: {e}")
+        return []
 
 
 # ── Base de datos ─────────────────────────────────────────────
@@ -136,14 +168,12 @@ def upsert_prod(url, nombre, categoria, sku):
             {"url": url, "tienda": "mercadolibre", "nombre": nombre,
              "categoria": categoria, "sku": sku, "activo": True},
             on_conflict="sku,tienda").execute()
-        if r.data:
-            return r.data[0]["id"]
-        r2 = db.table("productos").select("id").eq("sku", sku) \
+        if r.data: return r.data[0]["id"]
+        r2 = db.table("productos").select("id").eq("sku", sku)\
             .eq("tienda", "mercadolibre").execute()
         return r2.data[0]["id"] if r2.data else None
     except Exception as e:
-        logger.error(f"[DB] {e}")
-        return None
+        logger.error(f"[DB] {e}"); return None
 
 def guardar_precio_db(pid, precio, precio_orig, stock):
     if not pid: return
@@ -160,7 +190,7 @@ def alerta_hoy(pid):
     if not pid: return False
     try:
         desde = datetime.utcnow().replace(hour=0, minute=0, second=0).isoformat()
-        r = db.table("alertas_enviadas").select("id") \
+        r = db.table("alertas_enviadas").select("id")\
             .eq("producto_id", pid).gte("timestamp", desde).execute()
         return len(r.data) > 0
     except Exception: return False
@@ -175,23 +205,29 @@ def guardar_alerta_db(pid, score, canal, precio, descuento):
         }).execute()
     except Exception: pass
 
+def get_minimo(pid):
+    try:
+        desde = (datetime.utcnow() - timedelta(days=90)).isoformat()
+        r = db.table("historial_precios").select("precio")\
+            .eq("producto_id", pid).gte("timestamp", desde)\
+            .eq("disponible", True).order("precio").limit(1).execute()
+        return float(r.data[0]["precio"]) if r.data else None
+    except Exception: return None
+
 def get_stats(pid, precio_actual):
     try:
         desde = (datetime.utcnow() - timedelta(days=90)).isoformat()
-        r = db.table("historial_precios").select("precio, timestamp") \
-            .eq("producto_id", pid).gte("timestamp", desde) \
+        r = db.table("historial_precios").select("precio, timestamp")\
+            .eq("producto_id", pid).gte("timestamp", desde)\
             .eq("disponible", True).order("timestamp").execute()
         regs = r.data or []
         if len(regs) < 5: return {}
-        precios   = [float(x["precio"]) for x in regs]
-        primer_ts = datetime.fromisoformat(regs[0]["timestamp"].replace("Z",""))
-        dias      = (datetime.utcnow() - primer_ts).days + 1
-        min_p     = min(precios)
-        max_p     = max(precios)
-        avg_p     = sum(precios) / len(precios)
-        es_minimo = precio_actual <= min_p * 1.02 and dias >= 7
-        return {"min": min_p, "max": max_p, "avg": avg_p,
-                "dias": dias, "es_minimo": es_minimo}
+        precios = [float(x["precio"]) for x in regs]
+        primer  = datetime.fromisoformat(regs[0]["timestamp"].replace("Z",""))
+        dias    = (datetime.utcnow() - primer).days + 1
+        return {"min": min(precios), "max": max(precios),
+                "avg": sum(precios)/len(precios), "dias": dias,
+                "es_minimo": precio_actual <= min(precios)*1.02 and dias >= 7}
     except Exception: return {}
 
 
@@ -211,11 +247,7 @@ def enviar(chat_id, texto):
     return None
 
 def link_ml(url, item_id):
-    p = urllib.parse.urlencode({
-        "as_src": "affiliate", "as_campaign": "dropnodemx",
-        "as_content": item_id, "url": url,
-        "affiliate_id": ML_AFFILIATE_ID,
-    })
+    p = f"as_src=affiliate&as_campaign=dropnodemx&as_content={item_id}&url={requests.utils.quote(url)}&affiliate_id={ML_AFFILIATE_ID}"
     return f"https://go.mercadolibre.com.mx?{p}"
 
 def score_item(descuento, stock, precio):
@@ -244,31 +276,24 @@ def construir_msg_vip(item):
     cat = item["categoria"]["nombre"]
     hr  = datetime.now(TZ_MEXICO).strftime("%H:%M:%S")
     rl  = po * 0.80; rh = po * 0.92
-
     icono = "🚨" if sc >= 8 else ("🔥" if sc >= 6 else "⚡")
     tag   = "ERROR DE PRECIO" if sc >= 8 else ("OFERTA AGRESIVA" if sc >= 6 else "DESCUENTO REAL")
-
     if s == 1: stxt = "*ULTIMA UNIDAD*"
     elif s <= 3: stxt = f"*Solo {s} unidades*"
     elif s <= 10: stxt = f"{s} unidades"
     else: stxt = "Stock disponible"
-
-    m  = f"{icono} *{tag}*  {em} {cat}\n\n"
-    m += f"*{n}*\n\n"
+    m  = f"{icono} *{tag}*  {em} {cat}\n\n*{n}*\n\n"
     m += f"Precio ahora:    *${p:,.0f} MXN*\n"
     m += f"Precio original:  ${po:,.0f} MXN\n"
     m += f"Descuento real:  *-{d:.0f}%*\n"
-    if st.get("es_minimo") and st.get("dias", 0) >= 7:
-        m += f"\n*Precio mas bajo en {st['dias']} dias de seguimiento*\n"
+    if st.get("es_minimo") and st.get("dias",0) >= 7:
+        m += f"\n*Precio mas bajo en {st['dias']} dias*\n"
     if st.get("avg") and p < st["avg"] * 0.90:
-        m += f"${st['avg']-p:,.0f} menos que el precio promedio\n"
+        m += f"${st['avg']-p:,.0f} menos que el promedio\n"
     m += f"\n{stxt}\n"
-    if d >= 35 or s <= 3:
-        m += "_Oferta podria terminar pronto_\n"
-    m += f"\nScore: {sc}/10\n\n"
-    m += f"[COMPRAR AHORA]({lnk})\n\n"
-    m += f"_Reventa estimada: ${rl:,.0f} - ${rh:,.0f} MXN_\n"
-    m += f"_{hr} hora MX_"
+    if d >= 35 or s <= 3: m += "_Oferta podria terminar pronto_\n"
+    m += f"\nScore: {sc}/10\n\n[COMPRAR AHORA]({lnk})\n\n"
+    m += f"_Reventa estimada: ${rl:,.0f} - ${rh:,.0f} MXN_\n_{hr} hora MX_"
     return m
 
 def construir_msg_free(item):
@@ -281,30 +306,24 @@ def construir_msg_free(item):
     st  = item.get("stats", {})
     em  = item["categoria"]["emoji"]
     sc  = item["score"]
-
     icono = "🚨" if sc >= 8 else ("🔥" if sc >= 6 else "⚡")
-    m  = f"{icono} *DESCUENTO REAL*  {em}\n\n"
-    m += f"*{n}*\n\n"
-    m += f"*${p:,.0f} MXN* (-{d:.0f}%)\n"
-    m += f"Ref: ${po:,.0f} MXN\n"
-    if st.get("es_minimo") and st.get("dias", 0) >= 7:
+    m  = f"{icono} *DESCUENTO REAL*  {em}\n\n*{n}*\n\n"
+    m += f"*${p:,.0f} MXN* (-{d:.0f}%)\nRef: ${po:,.0f} MXN\n"
+    if st.get("es_minimo") and st.get("dias",0) >= 7:
         m += f"\n*Precio mas bajo en {st['dias']} dias*\n"
-    if s <= 5:
-        m += f"*Solo {s} unidades*\n"
+    if s <= 5: m += f"*Solo {s} unidades*\n"
     m += f"\n[Ver oferta]({lnk})\n\n"
     m += f"_Canal VIP: alertas primero + analisis de reventa._\n"
-    if LAUNCHPASS_LINK:
-        m += f"_{LAUNCHPASS_LINK}_"
+    if LAUNCHPASS_LINK: m += f"_{LAUNCHPASS_LINK}_"
     return m
 
 def notificar_make(item):
     if not MAKE_WEBHOOK_URL: return
     try:
         requests.post(MAKE_WEBHOOK_URL, json={
-            "nombre": item["nombre"][:80],
-            "precio": str(round(item["precio"])),
-            "descuento": str(round(item["descuento"] * 100)),
-            "thumbnail": item.get("thumbnail", ""),
+            "nombre": item["nombre"][:80], "precio": str(round(item["precio"])),
+            "descuento": str(round(item["descuento"]*100)),
+            "thumbnail": item.get("thumbnail",""),
             "link": item["url"], "score": item["score"],
         }, timeout=10)
     except Exception: pass
@@ -312,77 +331,77 @@ def notificar_make(item):
 
 # ── Ciclo principal ───────────────────────────────────────────
 
+def procesar_producto(prod_raw, categoria):
+    """Normaliza un producto crudo y lo procesa."""
+    try:
+        item_id  = str(prod_raw.get("id", ""))
+        nombre   = str(prod_raw.get("title", ""))[:80]
+        precio   = float(prod_raw.get("price", 0))
+        precio_o = prod_raw.get("original_price")
+        precio_o = float(precio_o) if precio_o else 0
+        permalink= str(prod_raw.get("permalink", ""))
+        stock    = int(prod_raw.get("available_quantity", 10))
+        thumb    = str(prod_raw.get("thumbnail", ""))
+
+        if not nombre or precio <= 0 or not permalink:
+            return None
+
+        pid = upsert_prod(permalink, nombre, categoria["nombre"], item_id)
+        guardar_precio_db(pid, precio, precio_o or precio, stock)
+
+        if alerta_hoy(pid): return None
+
+        descuento = 0.0
+        if precio_o and precio_o > precio:
+            descuento = (precio_o - precio) / precio_o
+        else:
+            minimo = get_minimo(pid)
+            if minimo and precio < minimo * 0.85:
+                descuento = (minimo - precio) / minimo
+                precio_o  = minimo
+
+        sc    = score_item(descuento, stock, precio)
+        stats = get_stats(pid, precio)
+
+        return {"id": item_id, "pid": pid, "nombre": nombre,
+                "precio": precio, "precio_orig": precio_o or precio,
+                "descuento": descuento, "stock": stock,
+                "url": permalink, "thumbnail": thumb,
+                "categoria": categoria, "score": sc, "stats": stats}
+    except Exception:
+        return None
+
+
 def main():
     hora_mx = datetime.now(TZ_MEXICO)
-    logger.info(f"[GITHUB] {hora_mx.strftime('%d/%m %H:%M')} MX | "
-                f"ScraperAPI: {'SI' if SCRAPER_API_KEY else 'NO'}")
+    logger.info(f"[GITHUB v3] {hora_mx.strftime('%d/%m %H:%M')} MX")
 
     if not (8 <= hora_mx.hour < 22):
         logger.info("[GITHUB] Fuera de horario")
         return
 
-    if not get_token():
-        logger.error("[GITHUB] Sin token ML")
-        return
-
     alertas    = []
     destacados = []
 
-    for cat in CATEGORIAS:
-        logger.info(f"[CAT] {cat['emoji']} {cat['nombre']}")
-        mejor_cat  = None
+    for pagina in PAGINAS_OFERTAS:
+        productos_raw = scrape_pagina(pagina)
+        cat = {"nombre": pagina["nombre"], "emoji": pagina["emoji"]}
+        mejor_pag  = None
         mejor_sc   = -1
 
-        items_raw = buscar(cat["id"], 0)
-        if not items_raw:
-            logger.info(f"[CAT] {cat['nombre']}: sin resultados (probablemente bloqueado)")
-            continue
+        for prod_raw in productos_raw[:30]:
+            item = procesar_producto(prod_raw, cat)
+            if not item: continue
 
-        for item_raw in items_raw:
-            item_id  = item_raw.get("id")
-            nombre   = item_raw.get("title", "")
-            precio   = item_raw.get("price", 0)
-            precio_o = item_raw.get("original_price") or 0
-            permalink= item_raw.get("permalink", "")
-            stock    = item_raw.get("available_quantity", 0)
-            thumb    = item_raw.get("thumbnail", "")
+            if item["score"] > mejor_sc:
+                mejor_sc  = item["score"]
+                mejor_pag = item
 
-            if not precio or precio <= 0: continue
+            if item["descuento"] >= UMBRAL_FREE:
+                alertas.append(item)
 
-            det = detalle(item_id)
-            if det:
-                precio   = det.get("price", precio)
-                precio_o = det.get("original_price") or precio_o
-                stock    = det.get("available_quantity", stock)
-                thumb    = det.get("thumbnail", thumb)
-
-            pid = upsert_prod(permalink, nombre, cat["nombre"], item_id)
-            guardar_precio_db(pid, precio, precio_o or precio, stock)
-
-            if stock <= 0 or alerta_hoy(pid): continue
-
-            descuento = 0.0
-            if precio_o and precio_o > precio:
-                descuento = (precio_o - precio) / precio_o
-
-            sc    = score_item(descuento, stock, precio)
-            stats = get_stats(pid, precio)
-
-            proc = {"id": item_id, "pid": pid, "nombre": nombre,
-                    "precio": precio, "precio_orig": precio_o or precio,
-                    "descuento": descuento, "stock": stock,
-                    "url": permalink, "thumbnail": thumb,
-                    "categoria": cat, "score": sc, "stats": stats}
-
-            if sc > mejor_sc:
-                mejor_sc  = sc
-                mejor_cat = proc
-
-            if descuento >= UMBRAL_FREE:
-                alertas.append(proc)
-
-        if mejor_cat:
-            destacados.append(mejor_cat)
+        if mejor_pag:
+            destacados.append(mejor_pag)
 
     alertas.sort(key=lambda x: x["score"], reverse=True)
 
@@ -407,7 +426,7 @@ def main():
                 free_n += 1
                 time.sleep(5)
 
-    # Mejores del dia si no hubo alertas
+    # Mejores del dia si no hubo alertas a las 12 PM o 7 PM
     if free_n == 0 and hora_mx.hour in (12, 19) and destacados:
         top = sorted(destacados, key=lambda x: x["score"], reverse=True)[:5]
         hl  = "tarde" if hora_mx.hour >= 15 else "manana"
@@ -419,7 +438,7 @@ def main():
             ln  = f"{i}. {it['categoria']['emoji']} *[{it['nombre'][:50]}]({lnk})*\n"
             ln += f"   *${it['precio']:,.0f} MXN*"
             if d >= 10: ln += f" (-{d:.0f}%)"
-            if it.get("stats", {}).get("es_minimo"):
+            if it.get("stats",{}).get("es_minimo"):
                 ln += f"\n   _Precio mas bajo en {it['stats']['dias']} dias_"
             msg += ln + "\n\n"
         if LAUNCHPASS_LINK:
