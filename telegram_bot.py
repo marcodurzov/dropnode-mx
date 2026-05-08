@@ -372,40 +372,70 @@ def calcular_ahorro_estimado(alertas):
     return total
 
 def enviar_resumen_diario(total_vip=0, total_free=0):
-    from database import get_metricas_autolearning
-    alertas_hoy = []
+    import datetime as _dt
+    from database import get_client
+
+    vip_real = 0
+    free_real = 0
+    ahorro = 0.0
+    mejor_d = 0.0
     try:
-        todas = get_metricas_autolearning()
-        hoy   = str(hora_mx().date())
-        alertas_hoy = [a for a in todas
-                       if a.get("timestamp", "")[:10] == hoy]
+        db = get_client()
+        # Buscar alertas de las ultimas 24h (cubre diferencia UTC/Mexico)
+        desde_utc = (_dt.datetime.utcnow() - _dt.timedelta(hours=24)).isoformat()
+        r = db.table("alertas_enviadas").select(
+            "canal, precio_alerta, descuento_real"
+        ).gte("timestamp", desde_utc).execute()
+        rows = r.data or []
+        vip_real  = sum(1 for x in rows if x.get("canal") == "vip")
+        free_real = sum(1 for x in rows if x.get("canal") == "free")
+        for row in rows:
+            p = float(row.get("precio_alerta") or 0)
+            d = float(row.get("descuento_real") or 0)
+            if p > 0 and 0 < d < 1:
+                ahorro += (p / (1 - d)) - p
+            if d > mejor_d:
+                mejor_d = d
     except Exception:
         pass
 
-    total   = total_vip + total_free
-    ahorro  = calcular_ahorro_estimado(alertas_hoy)
-    mejor_d = max((a.get("descuento_real", 0) for a in alertas_hoy),
-                  default=0) * 100
+    total = vip_real + free_real
+    lnk = (f'<a href="{LAUNCHPASS_LINK}">Acceso VIP</a>'
+           if LAUNCHPASS_LINK else "Acceso VIP")
 
-    msg_vip = (
-        f"Resumen ultimas 24 hrs - DropNode MX VIP\n\n"
-        f"Alertas VIP enviadas: *{total_vip}*\n"
-        f"Alertas canal publico: *{total_free}*\n"
-        f"Oportunidades analizadas: *{total}*\n"
-    )
-    if mejor_d > 0:
-        msg_vip += f"Mejor descuento del dia: *-{mejor_d:.0f}%*\n"
-    if ahorro > 0:
-        msg_vip += f"Ahorro acumulado estimado: *~${ahorro:,.0f} MXN*\n"
-    msg_vip += "\n_Seguimos monitoreando las mejores oportunidades._"
+    if total == 0:
+        msg_vip = (
+            "Resumen ultimas 24 hrs - DropNode MX VIP\n\n"
+            "Nuestro equipo sigue monitoreando las mejores oportunidades."
+        )
+        msg_free = (
+            "Resumen del dia - DropNode MX\n\n"
+            "Nuestro equipo sigue monitoreando.\n\n" + lnk
+        )
+    else:
+        msg_vip = "<b>Resumen ultimas 24 hrs - DropNode MX VIP</b>\n\n"
+        if vip_real > 0:
+            msg_vip += f"Alertas exclusivas VIP: <b>{vip_real}</b>\n"
+        if free_real > 0:
+            msg_vip += f"Alertas canal publico: <b>{free_real}</b>\n"
+        if total > 0:
+            msg_vip += f"Oportunidades analizadas: <b>{total}</b>\n"
+        if mejor_d > 0:
+            msg_vip += f"Mejor descuento del dia: <b>-{mejor_d * 100:.0f}%</b>\n"
+        if ahorro > 0:
+            msg_vip += f"Ahorro estimado: <b>~${ahorro:,.0f} MXN</b>\n"
+        msg_vip += "\n<i>Nuestro equipo sigue monitoreando.</i>"
 
-    msg_free = f"Resumen del dia - DropNode MX\n\nOportunidades encontradas: *{total}*\n"
-    if ahorro > 0:
-        msg_free += f"Ahorro estimado: *~${ahorro:,.0f} MXN*\n"
-    msg_free += f"\n_Nuestro equipo sigue monitoreando._\n\nAcceso VIP: {LAUNCHPASS_LINK}"
+        msg_free = "<b>Resumen del dia - DropNode MX</b>\n\n"
+        if total > 0:
+            msg_free += f"Oportunidades encontradas: <b>{total}</b>\n"
+        if ahorro > 0:
+            msg_free += f"Ahorro estimado: <b>~${ahorro:,.0f} MXN</b>\n"
+        msg_free += "\n<i>Nuestro equipo sigue monitoreando.</i>\n\n" + lnk
 
-    enviar_mensaje(CHANNEL_VIP_ID, msg_vip)
-    enviar_mensaje(CHANNEL_FREE_ID, msg_free)
+    enviar_mensaje(CHANNEL_VIP_ID, msg_vip, parse_mode="HTML")
+    enviar_mensaje(CHANNEL_FREE_ID, msg_free, parse_mode="HTML")
+
 
 
 # ─────────────────────────────────────────────
