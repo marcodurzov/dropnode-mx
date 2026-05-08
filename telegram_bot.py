@@ -1,4 +1,4 @@
-=============================================================
+# =============================================================
 # DROPNODE MX — telegram_bot.py v2.2
 # Mensajes con contexto histórico + urgencia + prueba social
 # + setup del canal free con mensaje fijado
@@ -65,13 +65,13 @@ def construir_contexto_historico(producto_id: str, precio_actual: float) -> dict
     ctx = {}
     if not stats:
         return ctx
-    min_p  = stats.get("precio_minimo", precio_actual)
-    max_p  = stats.get("precio_maximo", precio_actual)
-    avg_p  = stats.get("precio_promedio", precio_actual)
-    dias_h = stats.get("dias_historial", 0)
+    min_p    = stats.get("precio_minimo", precio_actual)
+    max_p    = stats.get("precio_maximo", precio_actual)
+    avg_p    = stats.get("precio_promedio", precio_actual)
+    dias_h   = stats.get("dias_historial", 0)
     dias_act = stats.get("dias_en_precio_actual", 0)
     if precio_actual <= min_p * 1.01 and dias_h >= 7:
-        ctx["es_minimo"] = True
+        ctx["es_minimo"]    = True
         ctx["frase_minimo"] = f"Precio mas bajo en {dias_h} dias de seguimiento"
     if avg_p > 0 and precio_actual < avg_p * 0.90:
         ctx["vs_promedio"] = f"${avg_p - precio_actual:,.0f} menos que el precio promedio"
@@ -86,16 +86,16 @@ def construir_contexto_historico(producto_id: str, precio_actual: float) -> dict
 
 def construir_prueba_social(producto_id: str, stock: int) -> dict:
     eng = get_engagement_producto(producto_id)
-    ps = {}
-    if stock == 1:       ps["stock"] = "ULTIMA UNIDAD disponible"
-    elif stock <= 3:     ps["stock"] = f"Solo {stock} unidades en existencia"
-    elif stock <= 5:     ps["stock"] = f"{stock} unidades disponibles"
-    elif stock <= 10:    ps["stock"] = f"{stock} unidades — stock bajo"
+    ps  = {}
+    if stock == 1:    ps["stock"] = "ULTIMA UNIDAD disponible"
+    elif stock <= 3:  ps["stock"] = f"Solo {stock} unidades en existencia"
+    elif stock <= 5:  ps["stock"] = f"{stock} unidades disponibles"
+    elif stock <= 10: ps["stock"] = f"{stock} unidades — stock bajo"
     clicks = eng.get("total_clicks", 0)
-    if clicks >= 10:     ps["clicks"] = f"{clicks} personas del canal vieron esta oferta"
-    elif clicks >= 3:    ps["clicks"] = f"{clicks} personas del canal revisaron este producto"
+    if clicks >= 10:  ps["clicks"] = f"{clicks} personas del canal vieron esta oferta"
+    elif clicks >= 3: ps["clicks"] = f"{clicks} personas del canal revisaron este producto"
     alertas = eng.get("total_alertas", 0)
-    if alertas >= 3:     ps["recurrente"] = f"Alerta enviada {alertas} veces — precio vuelve a caer"
+    if alertas >= 3:  ps["recurrente"] = f"Alerta enviada {alertas} veces — precio vuelve a caer"
     return ps
 
 
@@ -111,24 +111,24 @@ def estimar_ventana_oferta(descuento: float, stock: int) -> str:
 # ─────────────────────────────────────────────
 
 def formatear_vip(alerta: dict) -> str:
-    interp   = interpretar_score(alerta["heat_score"])
-    nombre   = alerta["nombre"][:65]
-    p_act    = alerta["precio_actual"]
-    p_ref    = alerta["precio_minimo"]
-    p_orig   = alerta["precio_original"]
-    descuento = alerta["descuento_real"] * 100
-    stock    = alerta["stock"]
-    emoji_c  = alerta["categoria"]["emoji"]
+    interp     = interpretar_score(alerta["heat_score"])
+    nombre     = alerta["nombre"][:65]
+    p_act      = alerta["precio_actual"]
+    p_ref      = alerta["precio_minimo"]
+    p_orig     = alerta["precio_original"]
+    descuento  = alerta["descuento_real"] * 100
+    stock      = alerta["stock"]
+    emoji_c    = alerta["categoria"]["emoji"]
     cat_nombre = alerta["categoria"]["nombre"]
-    link     = link_auto(alerta["permalink"], alerta["item_id"])
-    score    = alerta["heat_score"]
-    es_frio  = alerta.get("modo_frio", False)
-    ctx      = construir_contexto_historico(alerta["producto_id"], p_act)
-    ps       = construir_prueba_social(alerta["producto_id"], stock)
-    ventana  = estimar_ventana_oferta(alerta["descuento_real"], stock)
+    link       = link_auto(alerta["permalink"], alerta["item_id"])
+    score      = alerta["heat_score"]
+    es_frio    = alerta.get("modo_frio", False)
+    ctx        = construir_contexto_historico(alerta["producto_id"], p_act)
+    ps         = construir_prueba_social(alerta["producto_id"], stock)
+    ventana    = estimar_ventana_oferta(alerta["descuento_real"], stock)
     rl = p_ref * 0.80
     rh = p_ref * 0.92
-    ref_label = "Precio tachado" if es_frio else "Minimo historico"
+    ref_label  = "Precio tachado" if es_frio else "Minimo historico"
 
     msg  = f"{interp['emoji']} *{interp['etiqueta']}* {emoji_c} {cat_nombre}\n\n"
     msg += f"*{nombre}*\n\n"
@@ -158,16 +158,16 @@ def formatear_vip(alerta: dict) -> str:
 
 
 def formatear_free(alerta: dict) -> str:
-    interp   = interpretar_score(alerta["heat_score"])
-    nombre   = alerta["nombre"][:60]
-    p_act    = alerta["precio_actual"]
-    p_ref    = alerta["precio_minimo"]
+    interp    = interpretar_score(alerta["heat_score"])
+    nombre    = alerta["nombre"][:60]
+    p_act     = alerta["precio_actual"]
+    p_ref     = alerta["precio_minimo"]
     descuento = alerta["descuento_real"] * 100
-    emoji_c  = alerta["categoria"]["emoji"]
-    link     = link_auto(alerta["permalink"], alerta["item_id"])
-    stock    = alerta["stock"]
-    ctx      = construir_contexto_historico(alerta["producto_id"], p_act)
-    ps       = construir_prueba_social(alerta["producto_id"], stock)
+    emoji_c   = alerta["categoria"]["emoji"]
+    link      = link_auto(alerta["permalink"], alerta["item_id"])
+    stock     = alerta["stock"]
+    ctx       = construir_contexto_historico(alerta["producto_id"], p_act)
+    ps        = construir_prueba_social(alerta["producto_id"], stock)
 
     msg  = f"{interp['emoji']} *{interp['etiqueta']}* {emoji_c}\n\n"
     msg += f"*{nombre}*\n\n"
@@ -188,10 +188,10 @@ def formatear_free(alerta: dict) -> str:
 def formatear_mejor_del_dia(alertas: list) -> str:
     if not alertas:
         return ""
-    hora  = hora_mx()
+    hora   = hora_mx()
     titulo = "Mejores precios de la tarde" if hora.hour >= 15 else "Mejores precios de la manana"
-    msg   = f"📋 *{titulo} — DropNode MX*\n\n"
-    msg  += "_Nuestro equipo reviso miles de productos. Estos destacan hoy:_\n\n"
+    msg    = f"📋 *{titulo} — DropNode MX*\n\n"
+    msg   += "_Nuestro equipo reviso miles de productos. Estos destacan hoy:_\n\n"
     for i, item in enumerate(alertas[:5], 1):
         nombre = item["nombre"][:50]
         precio = item["precio_actual"]
@@ -319,7 +319,7 @@ def enviar_resumen_diario(total_vip=0, total_free=0):
             p = float(row.get("precio_alerta") or 0)
             d = float(row.get("descuento_real") or 0)
             if p > 0 and 0 < d < 1:
-                ahorro  += (p / (1 - d)) - p
+                ahorro += (p / (1 - d)) - p
                 if d > mejor_d:
                     mejor_d = d
     except Exception:
@@ -341,7 +341,7 @@ def enviar_resumen_diario(total_vip=0, total_free=0):
         if ahorro > 0:    msg_vip += f"Ahorro estimado: <b>~${ahorro:,.0f} MXN</b>\n"
         msg_vip += "\n<i>Nuestro equipo sigue monitoreando.</i>"
 
-        msg_free = "<b>Resumen del dia - DropNode MX</b>\n\n"
+        msg_free  = "<b>Resumen del dia - DropNode MX</b>\n\n"
         if total > 0:  msg_free += f"Oportunidades encontradas: <b>{total}</b>\n"
         if ahorro > 0: msg_free += f"Ahorro estimado: <b>~${ahorro:,.0f} MXN</b>\n"
         msg_free += "\n<i>Nuestro equipo sigue monitoreando.</i>\n\n" + lnk
@@ -376,7 +376,8 @@ def es_spam(texto):
 def eliminar_mensaje_chat(chat_id, message_id):
     try:
         requests.post(f"{TELEGRAM_API}/deleteMessage",
-                      json={"chat_id": chat_id, "message_id": message_id}, timeout=10)
+                      json={"chat_id": chat_id, "message_id": message_id},
+                      timeout=10)
     except Exception:
         pass
 
@@ -398,18 +399,19 @@ def silenciar(chat_id, user_id, segundos=3600):
 def banear(chat_id, user_id):
     try:
         requests.post(f"{TELEGRAM_API}/banChatMember",
-                      json={"chat_id": chat_id, "user_id": user_id}, timeout=10)
+                      json={"chat_id": chat_id, "user_id": user_id},
+                      timeout=10)
     except Exception:
         pass
 
 
 def procesar_mensaje_grupo(update):
     try:
-        msg    = update.get("message", {})
-        chat   = msg.get("chat", {})
-        user   = msg.get("from", {})
-        texto  = msg.get("text", "")
-        msg_id = msg.get("message_id")
+        msg     = update.get("message", {})
+        chat    = msg.get("chat", {})
+        user    = msg.get("from", {})
+        texto   = msg.get("text", "")
+        msg_id  = msg.get("message_id")
         chat_id = chat.get("id")
         user_id = user.get("id")
         nombre  = user.get("first_name", "Usuario")
@@ -447,7 +449,8 @@ def revisar_actualizaciones_grupo():
         if updates:
             last = updates[-1]["update_id"]
             requests.get(f"{TELEGRAM_API}/getUpdates",
-                         params={"offset": last + 1, "limit": 1}, timeout=10)
+                         params={"offset": last + 1, "limit": 1},
+                         timeout=10)
     except Exception as e:
         logger.error(f"[MOD] getUpdates: {e}")
 
@@ -457,7 +460,6 @@ def revisar_actualizaciones_grupo():
 # ─────────────────────────────────────────────
 
 def enviar_mensaje(chat_id, texto, preview=False, parse_mode="Markdown"):
-    url     = f"{TELEGRAM_API}/sendMessage"
     payload = {
         "chat_id":                  chat_id,
         "text":                     texto,
@@ -465,13 +467,12 @@ def enviar_mensaje(chat_id, texto, preview=False, parse_mode="Markdown"):
         "disable_web_page_preview": not preview,
     }
     try:
-        resp = requests.post(url, json=payload, timeout=15)
+        resp = requests.post(f"{TELEGRAM_API}/sendMessage", json=payload, timeout=15)
         data = resp.json()
         if data.get("ok"):
             return data["result"]["message_id"]
-        else:
-            logger.error(f"[TG] {data.get('description', '?')}")
-            return None
+        logger.error(f"[TG] {data.get('description', '?')}")
+        return None
     except Exception as e:
         logger.error(f"[TG] {e}")
         return None
@@ -480,7 +481,8 @@ def enviar_mensaje(chat_id, texto, preview=False, parse_mode="Markdown"):
 def fijar_mensaje(chat_id, message_id):
     try:
         requests.post(f"{TELEGRAM_API}/pinChatMessage",
-                      json={"chat_id": chat_id, "message_id": message_id}, timeout=10)
+                      json={"chat_id": chat_id, "message_id": message_id},
+                      timeout=10)
     except Exception:
         pass
 
@@ -551,7 +553,7 @@ def publicar_mejores_del_dia(destacados: list):
 
 
 # ─────────────────────────────────────────────
-# SETUP CANAL FREE — mensaje fijado al inicio
+# SETUP CANAL FREE
 # ─────────────────────────────────────────────
 
 def canal_free_tiene_fijado():
@@ -566,10 +568,8 @@ def canal_free_tiene_fijado():
 
 def setup_canal_free():
     """
-    Envía y fija el mensaje de bienvenida del canal free.
-    Se llama al inicio de main.py si el canal no tiene mensaje fijado.
-    Usa botón inline para el link VIP — evita el bug del URL largo
-    que ocurre cuando LAUNCHPASS_LINK contiene & u otros caracteres.
+    Envía y fija el mensaje de bienvenida del canal free al iniciar.
+    Usa botón inline para el link VIP — evita el bug del URL largo.
     """
     texto = (
         "<b>DropNode MX — Descuentos reales que valen la pena</b>\n\n"
@@ -606,9 +606,8 @@ def setup_canal_free():
             fijar_mensaje(CHANNEL_FREE_ID, msg_id)
             logger.info("[SETUP] Mensaje fijado en canal free ✓")
             return True
-        else:
-            logger.error(f"[SETUP] Error canal free: {data.get('description', '?')}")
-            return False
+        logger.error(f"[SETUP] Error canal free: {data.get('description', '?')}")
+        return False
     except Exception as e:
         logger.error(f"[SETUP] {e}")
         return False
