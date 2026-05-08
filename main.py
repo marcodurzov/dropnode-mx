@@ -1,9 +1,10 @@
 # =============================================================
-# DROPNODE MX — main.py v2.3 Railway
+# DROPNODE MX — main.py v2.4 Railway
 # ML scraping movido a GitHub Actions
-# Railway maneja: Walmart, Liverpool, Coppel, Amazon, SHEIN,
-#                 AliExpress, Marcas electrónicas, TikTok trending
-# + setup de mensaje fijado en canal free al iniciar
+# Railway: Walmart, Liverpool, Coppel, Amazon, SHEIN,
+#          AliExpress, Marcas electrónicas, TikTok trending
+# + Setup de canal free al iniciar
+# + Verificación de peticiones en cada ciclo
 # =============================================================
 
 import schedule, time, logging, sys
@@ -31,9 +32,10 @@ from telegram_bot import (
     setup_canal_free,
     canal_free_tiene_fijado,
 )
-from auto_learning      import ejecutar_autolearning
-from community_manager  import ejecutar_community_manager
-from heat_score         import calcular_heat_score
+from auto_learning     import ejecutar_autolearning
+from community_manager import ejecutar_community_manager
+from heat_score        import calcular_heat_score
+from peticiones        import verificar_match
 from config import (
     TELEGRAM_TOKEN, GROUP_ID, CHANNEL_FREE_ID, CHANNEL_VIP_ID,
     LAUNCHPASS_LINK, TIMEZONE_OFFSET_HOURS, FRECUENCIA_AUTOLEARNING_HORAS,
@@ -44,7 +46,7 @@ logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(message)s",
     handlers=[
         logging.StreamHandler(sys.stdout),
-        logging.FileHandler("dropnode.log", encoding="utf-8")
+        logging.FileHandler("dropnode.log", encoding="utf-8"),
     ]
 )
 logger = logging.getLogger(__name__)
@@ -60,7 +62,7 @@ def dentro_de_horario():
     return 8 <= hora_mx().hour < 22
 
 
-contadores  = {"vip": 0, "free": 0, "fecha": hora_mx().date()}
+contadores   = {"vip": 0, "free": 0, "fecha": hora_mx().date()}
 ciclo_numero = 0
 
 EMOJIS = {
@@ -70,7 +72,6 @@ EMOJIS = {
     "amazon":       "📦",
     "aliexpress":   "🌐",
     "shein":        "👗",
-    # Marcas electrónicas
     "samsung":      "📱",
     "sony":         "🎮",
     "lg":           "📺",
@@ -93,16 +94,15 @@ def resetear():
 
 
 def formatear_externa(item):
-    tienda  = item["tienda"]
-    nombre  = item["nombre"][:60]
-    precio  = item["precio_actual"]
+    tienda   = item["tienda"]
+    nombre   = item["nombre"][:60]
+    precio   = item["precio_actual"]
     precio_o = item["precio_original"]
-    desc    = item["descuento"] * 100
-    url     = item["url"]
-    et      = EMOJIS.get(tienda, "🛍️")
-    ec      = item["categoria"]["emoji"]
+    desc     = item["descuento"] * 100
+    url      = item["url"]
+    et       = EMOJIS.get(tienda, "🛍️")
+    ec       = item["categoria"]["emoji"]
 
-    # Nombre de tienda para mostrar (capitalizar marca)
     tienda_display = tienda.upper() if tienda in (
         "samsung", "sony", "lg", "lenovo", "dell", "hp",
         "asus", "xiaomi", "ghia", "hisense", "tcl"
@@ -116,7 +116,6 @@ def formatear_externa(item):
         f"[Ver producto]({url})\n\n"
         f"_Nuestro equipo lo encontro._"
     )
-
     vip = None
     if item["descuento"] >= 0.35:
         rl = precio_o * 0.78
@@ -142,10 +141,17 @@ def procesar_externa(items, max_a=2):
             stock=99,
             categoria=item["categoria"]["nombre"],
             precio_actual=item["precio_actual"],
-            precio_original=item["precio_original"]
+            precio_original=item["precio_original"],
         )
         if score < 3:
             continue
+
+        # Verificar si este producto cumple alguna petición de la comunidad
+        try:
+            verificar_match(item["nombre"], item["url"], item["precio_actual"])
+        except Exception:
+            pass
+
         free, vip = formatear_externa(item)
         if vip:
             enviar_mensaje(CHANNEL_VIP_ID, vip)
@@ -167,7 +173,6 @@ def ciclo_externas():
     logger.info(f"[CICLO #{ciclo_numero}] {hora_mx().strftime('%d/%m %H:%M')} MX")
 
     try:
-        # 8 turnos rotativos: 6 tiendas originales + marcas + tiktok trending
         turno = ciclo_numero % 8
         if   turno == 1: procesar_externa(ciclo_walmart(),    2)
         elif turno == 2: procesar_externa(ciclo_liverpool(),  2)
@@ -212,10 +217,10 @@ def configurar():
     schedule.every(60).seconds.do(revisar_actualizaciones_grupo)
 
     # UTC = MX + 6h
-    schedule.every().day.at("17:00").do(enviar_mensaje_financiero)  # 11 AM MX
-    schedule.every().day.at("00:00").do(enviar_mensaje_financiero)  # 6  PM MX
-    schedule.every().day.at("20:00").do(enviar_recordatorio_vip)    # 2  PM MX
-    schedule.every().day.at("02:00").do(enviar_recordatorio_vip)    # 8  PM MX
+    schedule.every().day.at("17:00").do(enviar_mensaje_financiero)   # 11 AM MX
+    schedule.every().day.at("00:00").do(enviar_mensaje_financiero)   # 6  PM MX
+    schedule.every().day.at("20:00").do(enviar_recordatorio_vip)     # 2  PM MX
+    schedule.every().day.at("02:00").do(enviar_recordatorio_vip)     # 8  PM MX
     schedule.every().day.at("03:05").do(
         lambda: enviar_resumen_diario(contadores["vip"], contadores["free"])
     )
@@ -225,10 +230,15 @@ def configurar():
 
     logger.info("Railway: Walmart|Liverpool|Coppel|Amazon|AliExpress|SHEIN|Marcas|TikTok")
     logger.info("ML scraping: GitHub Actions (cada 30 min)")
+    logger.info("Peticiones: activo — loop cerrado comunidad → VIP")
 
 
 if __name__ == "__main__":
-    logger.info(f"\n{'='*50}\n DROPNODE MX v2.3 — {hora_mx().strftime('%d/%m/%Y %H:%M')} MX\n{'='*50}\n")
+    logger.info(
+        f"\n{'='*50}\n"
+        f" DROPNODE MX v2.4 — {hora_mx().strftime('%d/%m/%Y %H:%M')} MX\n"
+        f"{'='*50}\n"
+    )
 
     # ── Setup inicial de canales ──
     if not grupo_tiene_fijado():
