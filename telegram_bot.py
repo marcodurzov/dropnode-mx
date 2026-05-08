@@ -1,7 +1,8 @@
 # =============================================================
-# DROPNODE MX — telegram_bot.py v2.2
+# DROPNODE MX — telegram_bot.py v2.3
 # Mensajes con contexto histórico + urgencia + prueba social
 # + setup del canal free con mensaje fijado
+# + integración con sistema de peticiones
 # =============================================================
 
 import requests, logging, urllib.parse, time, random
@@ -18,7 +19,7 @@ from database import guardar_alerta, get_stats_historicas, get_engagement_produc
 logger = logging.getLogger(__name__)
 
 TELEGRAM_API = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}"
-TZ_MEXICO = timezone(timedelta(hours=TIMEZONE_OFFSET_HOURS))
+TZ_MEXICO    = timezone(timedelta(hours=TIMEZONE_OFFSET_HOURS))
 
 
 def hora_mx():
@@ -115,7 +116,6 @@ def formatear_vip(alerta: dict) -> str:
     nombre     = alerta["nombre"][:65]
     p_act      = alerta["precio_actual"]
     p_ref      = alerta["precio_minimo"]
-    p_orig     = alerta["precio_original"]
     descuento  = alerta["descuento_real"] * 100
     stock      = alerta["stock"]
     emoji_c    = alerta["categoria"]["emoji"]
@@ -406,6 +406,11 @@ def banear(chat_id, user_id):
 
 
 def procesar_mensaje_grupo(update):
+    """
+    Procesa cada mensaje del grupo:
+    1. Moderación anti-spam (igual que antes)
+    2. Si la ventana de peticiones está activa, guarda el mensaje como petición
+    """
     try:
         msg     = update.get("message", {})
         chat    = msg.get("chat", {})
@@ -415,24 +420,35 @@ def procesar_mensaje_grupo(update):
         chat_id = chat.get("id")
         user_id = user.get("id")
         nombre  = user.get("first_name", "Usuario")
+
         if chat_id != GROUP_ID or user.get("is_bot"):
             return
-        if not es_spam(texto):
-            return
-        count = advertencias.get(user_id, 0) + 1
-        advertencias[user_id] = count
-        eliminar_mensaje_chat(chat_id, msg_id)
-        if count == 1:
-            enviar_mensaje(chat_id,
-                           f"{nombre}, tu mensaje fue removido. "
-                           f"Primera advertencia — sin links a otros canales.")
-        elif count == 2:
-            silenciar(chat_id, user_id, 3600)
-            enviar_mensaje(chat_id, f"{nombre} silenciado 1 hora por reincidencia.")
-        else:
-            banear(chat_id, user_id)
-            advertencias.pop(user_id, None)
-            enviar_mensaje(chat_id, f"{nombre} expulsado por multiples infracciones.")
+
+        # ── Moderación ──
+        if es_spam(texto):
+            count = advertencias.get(user_id, 0) + 1
+            advertencias[user_id] = count
+            eliminar_mensaje_chat(chat_id, msg_id)
+            if count == 1:
+                enviar_mensaje(chat_id,
+                               f"{nombre}, tu mensaje fue removido. "
+                               f"Primera advertencia — sin links a otros canales.")
+            elif count == 2:
+                silenciar(chat_id, user_id, 3600)
+                enviar_mensaje(chat_id, f"{nombre} silenciado 1 hora por reincidencia.")
+            else:
+                banear(chat_id, user_id)
+                advertencias.pop(user_id, None)
+                enviar_mensaje(chat_id, f"{nombre} expulsado por multiples infracciones.")
+            return  # No procesar como petición si es spam
+
+        # ── Peticiones (solo si la ventana está activa) ──
+        try:
+            from peticiones import procesar_posible_peticion
+            procesar_posible_peticion(msg)
+        except Exception:
+            pass  # Nunca romper el flujo de moderación por un error en peticiones
+
     except Exception as e:
         logger.error(f"[MOD] {e}")
 
@@ -557,7 +573,6 @@ def publicar_mejores_del_dia(destacados: list):
 # ─────────────────────────────────────────────
 
 def canal_free_tiene_fijado():
-    """Verifica si el canal free ya tiene mensaje fijado."""
     try:
         r = requests.get(f"{TELEGRAM_API}/getChat",
                          params={"chat_id": CHANNEL_FREE_ID}, timeout=10)
@@ -567,10 +582,6 @@ def canal_free_tiene_fijado():
 
 
 def setup_canal_free():
-    """
-    Envía y fija el mensaje de bienvenida del canal free al iniciar.
-    Usa botón inline para el link VIP — evita el bug del URL largo.
-    """
     texto = (
         "<b>DropNode MX — Descuentos reales que valen la pena</b>\n\n"
         "Nuestro equipo monitorea miles de productos en tiempo real.\n"
