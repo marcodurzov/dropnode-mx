@@ -312,45 +312,50 @@ def formatear_financiero_vip():
     return f"{prod['emoji']} *{prod['nombre']}* — {prod['descripcion']}\n[Ver]({prod['link']})"
 
 def formatear_recordatorio_vip():
+    lnk = (f'<a href="{LAUNCHPASS_LINK}">Canal DropNode VIP</a>'
+           if LAUNCHPASS_LINK else "Canal DropNode VIP")
     versiones = [
         (
-            "*Canal VIP DropNode MX*\n\n"
+            "<b>Canal VIP DropNode MX</b>\n\n"
             "Errores de precio - Analisis de reventa - Stock critico\n"
             "Todo antes que el canal publico.\n\n"
-            f"$299 MXN/mes - cancela cuando quieras\n{LAUNCHPASS_LINK}"
+            "$299 MXN/mes - cancela cuando quieras\n" + lnk
         ),
         (
-            "*Mientras lees esto...*\n\n"
+            "<b>Mientras lees esto...</b>\n\n"
             "Los miembros VIP ya recibieron alertas con analisis completo.\n"
-            "Las mejores oportunidades no esperan.\n\n"
-            f"{LAUNCHPASS_LINK}"
+            "Las mejores oportunidades no esperan.\n\n" + lnk
         ),
         (
-            "*Canal VIP — lo que incluye:*\n\n"
+            "<b>Canal VIP - lo que incluye:</b>\n\n"
             "Alertas en tiempo real\n"
             "Precio vs historico de 90 dias\n"
             "Estimacion de reventa\n"
             "Alertas de stock critico\n"
             "Reporte semanal exclusivo\n\n"
-            f"$299 MXN/mes\n{LAUNCHPASS_LINK}"
+            "$299 MXN/mes\n" + lnk
         ),
     ]
     idx = (hora_mx().day + hora_mx().hour) % len(versiones)
     return versiones[idx]
 
+
 def mensaje_bienvenida_grupo():
+    vip_link = (f'<a href="{LAUNCHPASS_LINK}">Canal VIP DropNode</a>'
+                if LAUNCHPASS_LINK else "Canal VIP DropNode")
     return (
-        "*Bienvenido a DropNode Community MX*\n\n"
+        "<b>Bienvenido a DropNode Community MX</b>\n\n"
         "Aqui compartimos los mejores descuentos que nuestro equipo encuentra.\n\n"
-        f"Canal gratuito: @DropNodeMX\n"
-        f"Canal VIP: {LAUNCHPASS_LINK}\n\n"
-        "*Reglas:*\n"
+        "Canal gratuito: @DropNodeMX\n"
+        "Canal VIP: " + vip_link + "\n\n"
+        "<b>Reglas:</b>\n"
         "1. Solo ofertas reales verificadas\n"
         "2. Sin links a otros canales\n"
         "3. Sin publicidad no autorizada\n"
         "4. Respeta a todos\n\n"
-        "_DropNode MX - Siempre encontramos el mejor precio._"
+        "<i>DropNode MX - Siempre encontramos el mejor precio.</i>"
     )
+
 
 
 # ─────────────────────────────────────────────
@@ -512,14 +517,15 @@ def revisar_actualizaciones_grupo():
 #  ENVIO
 # ─────────────────────────────────────────────
 
-def enviar_mensaje(chat_id, texto, preview=False):
+def enviar_mensaje(chat_id, texto, preview=False, parse_mode="Markdown"):
     url     = f"{TELEGRAM_API}/sendMessage"
     payload = {
         "chat_id":                  chat_id,
         "text":                     texto,
-        "parse_mode":               "Markdown",
+        "parse_mode":               parse_mode,
         "disable_web_page_preview": not preview,
     }
+
     try:
         resp = requests.post(url, json=payload, timeout=15)
         data = resp.json()
@@ -541,9 +547,10 @@ def fijar_mensaje(chat_id, message_id):
         pass
 
 def enviar_y_fijar_bienvenida_grupo():
-    msg_id = enviar_mensaje(GROUP_ID, mensaje_bienvenida_grupo())
+    msg_id = enviar_mensaje(GROUP_ID, mensaje_bienvenida_grupo(), parse_mode="HTML")
     if msg_id:
         fijar_mensaje(GROUP_ID, msg_id)
+
 
 def enviar_alerta(alerta):
     if not dentro_de_horario():
@@ -593,7 +600,8 @@ def enviar_mensaje_financiero():
 def enviar_recordatorio_vip():
     if not LAUNCHPASS_LINK:
         return
-    enviar_mensaje(CHANNEL_FREE_ID, formatear_recordatorio_vip())
+    enviar_mensaje(CHANNEL_FREE_ID, formatear_recordatorio_vip(), parse_mode="HTML")
+
 
 def publicar_mejores_del_dia(destacados: list):
     if not destacados:
