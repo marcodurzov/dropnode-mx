@@ -18,16 +18,16 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-SUPABASE_URL     = os.environ["SUPABASE_URL"].strip()
-SUPABASE_KEY     = os.environ["SUPABASE_KEY"].strip()
-TELEGRAM_TOKEN   = os.environ["TELEGRAM_TOKEN"].strip()
-CHANNEL_FREE_ID  = int(os.environ["CHANNEL_FREE_ID"].strip())
-CHANNEL_VIP_ID   = int(os.environ["CHANNEL_VIP_ID"].strip())
-ML_AFFILIATE_ID  = os.environ.get("ML_AFFILIATE_ID", "marcodurzo").strip()
-LAUNCHPASS_LINK  = os.environ.get("LAUNCHPASS_LINK", "").strip()
+SUPABASE_URL = os.environ["SUPABASE_URL"].strip()
+SUPABASE_KEY = os.environ["SUPABASE_KEY"].strip()
+TELEGRAM_TOKEN = os.environ["TELEGRAM_TOKEN"].strip()
+CHANNEL_FREE_ID = int(os.environ["CHANNEL_FREE_ID"].strip())
+CHANNEL_VIP_ID = int(os.environ["CHANNEL_VIP_ID"].strip())
+ML_AFFILIATE_ID = os.environ.get("ML_AFFILIATE_ID", "marcodurzo").strip()
+LAUNCHPASS_LINK = os.environ.get("LAUNCHPASS_LINK", "").strip()
 MAKE_WEBHOOK_URL = os.environ.get("MAKE_WEBHOOK_URL", "").strip()
 
-TZ_MEXICO    = timezone(timedelta(hours=-6))
+TZ_MEXICO = timezone(timedelta(hours=-6))
 TELEGRAM_API = "https://api.telegram.org/bot" + TELEGRAM_TOKEN
 
 db = None
@@ -57,33 +57,33 @@ def upsert_prod(url, nombre, categoria, sku):
 
 
 HORA_FREE_INICIO = 8
-HORA_FREE_FIN    = 22
-DESCUENTO_HOT    = 0.35
-SCORE_VIP_EXCL   = 7
-MAX_VIP          = 12
-MAX_FREE         = 4
-VENTAJA_SEG      = 180
+HORA_FREE_FIN = 22
+DESCUENTO_HOT = 0.35
+SCORE_VIP_EXCL = 7
+MAX_VIP = 12
+MAX_FREE = 4
+VENTAJA_SEG = 180
 
 PAGINAS_BASE = [
-    {"url": "https://www.mercadolibre.com.mx/ofertas",        "nombre": "Ofertas p1", "emoji": "🔥"},
-    {"url": "https://www.mercadolibre.com.mx/ofertas?page=2", "nombre": "Ofertas p2", "emoji": "🔥"},
-    {"url": "https://www.mercadolibre.com.mx/ofertas?page=3", "nombre": "Ofertas p3", "emoji": "🔥"},
-    {"url": "https://www.mercadolibre.com.mx/ofertas?page=4", "nombre": "Ofertas p4", "emoji": "🔥"},
-    {"url": "https://www.mercadolibre.com.mx/ofertas?page=5", "nombre": "Ofertas p5", "emoji": "🔥"},
-    {"url": "https://www.mercadolibre.com.mx/ofertas?page=6", "nombre": "Ofertas p6", "emoji": "🔥"},
-    {"url": "https://www.mercadolibre.com.mx/ofertas?page=7", "nombre": "Ofertas p7", "emoji": "🔥"},
-    {"url": "https://www.mercadolibre.com.mx/ofertas?page=8", "nombre": "Ofertas p8", "emoji": "🔥"},
+    {"url": "https://www.mercadolibre.com.mx/ofertas",           "nombre": "Ofertas p1", "emoji": "🔥"},
+    {"url": "https://www.mercadolibre.com.mx/ofertas?page=2",    "nombre": "Ofertas p2", "emoji": "🔥"},
+    {"url": "https://www.mercadolibre.com.mx/ofertas?page=3",    "nombre": "Ofertas p3", "emoji": "🔥"},
+    {"url": "https://www.mercadolibre.com.mx/ofertas?page=4",    "nombre": "Ofertas p4", "emoji": "🔥"},
+    {"url": "https://www.mercadolibre.com.mx/ofertas?page=5",    "nombre": "Ofertas p5", "emoji": "🔥"},
+    {"url": "https://www.mercadolibre.com.mx/ofertas?page=6",    "nombre": "Ofertas p6", "emoji": "🔥"},
+    {"url": "https://www.mercadolibre.com.mx/ofertas?page=7",    "nombre": "Ofertas p7", "emoji": "🔥"},
+    {"url": "https://www.mercadolibre.com.mx/ofertas?page=8",    "nombre": "Ofertas p8", "emoji": "🔥"},
 ]
 
 PAGINAS_CAT = [
-    {"url": "https://www.mercadolibre.com.mx/ofertas/electronica", "nombre": "Electronica",  "emoji": "🔌"},
-    {"url": "https://www.mercadolibre.com.mx/ofertas/celulares",   "nombre": "Celulares",    "emoji": "📱"},
-    {"url": "https://www.mercadolibre.com.mx/ofertas/computacion", "nombre": "Computacion",  "emoji": "💻"},
-    {"url": "https://www.mercadolibre.com.mx/ofertas/juguetes",    "nombre": "Juguetes",     "emoji": "🧸"},
-    {"url": "https://www.mercadolibre.com.mx/ofertas/bebes",       "nombre": "Bebes",        "emoji": "👶"},
-    {"url": "https://www.mercadolibre.com.mx/ofertas/mascotas",    "nombre": "Mascotas",     "emoji": "🐾"},
-    {"url": "https://www.mercadolibre.com.mx/ofertas/deportes",    "nombre": "Deportes",     "emoji": "⚽"},
-    {"url": "https://www.mercadolibre.com.mx/ofertas/hogar",       "nombre": "Hogar",        "emoji": "🏠"},
+    {"url": "https://www.mercadolibre.com.mx/ofertas/electronica",   "nombre": "Electronica",   "emoji": "🔌"},
+    {"url": "https://www.mercadolibre.com.mx/ofertas/celulares",     "nombre": "Celulares",     "emoji": "📱"},
+    {"url": "https://www.mercadolibre.com.mx/ofertas/computacion",   "nombre": "Computacion",   "emoji": "💻"},
+    {"url": "https://www.mercadolibre.com.mx/ofertas/juguetes",      "nombre": "Juguetes",      "emoji": "🧸"},
+    {"url": "https://www.mercadolibre.com.mx/ofertas/bebes",         "nombre": "Bebes",         "emoji": "👶"},
+    {"url": "https://www.mercadolibre.com.mx/ofertas/mascotas",      "nombre": "Mascotas",      "emoji": "🐾"},
+    {"url": "https://www.mercadolibre.com.mx/ofertas/deportes",      "nombre": "Deportes",      "emoji": "⚽"},
+    {"url": "https://www.mercadolibre.com.mx/ofertas/hogar",         "nombre": "Hogar",         "emoji": "🏠"},
 ]
 
 _hora_run = _dt.datetime.utcnow().hour
@@ -234,15 +234,19 @@ def get_stats(pid, precio_actual):
         if len(regs) < 5:
             return {}
         precios = [float(x["precio"]) for x in regs]
-        primer  = datetime.fromisoformat(regs[0]["timestamp"].replace("Z", ""))
-        dias    = (datetime.utcnow() - primer).days + 1
-        min_p   = min(precios)
+        primer = datetime.fromisoformat(regs[0]["timestamp"].replace("Z", ""))
+        dias = (datetime.utcnow() - primer).days + 1
+        min_p = min(precios)
         return {"min": min_p, "max": max(precios),
                 "avg": sum(precios)/len(precios), "dias": dias,
                 "es_minimo": precio_actual <= min_p * 1.02 and dias >= 7}
     except Exception:
         return {}
 
+
+# ─────────────────────────────────────────────
+# TELEGRAM — envío
+# ─────────────────────────────────────────────
 
 def enviar(chat_id, texto, modo="Markdown"):
     try:
@@ -260,10 +264,42 @@ def enviar(chat_id, texto, modo="Markdown"):
     return None
 
 
+def enviar_foto(chat_id, foto_url, caption, modo="Markdown"):
+    """
+    Envía imagen con caption.
+    Fallback automático a sendMessage si la foto falla
+    (URL expirada, formato no soportado, timeout, etc.)
+    """
+    cap = caption[:1024]  # Telegram limita captions a 1024 chars
+    try:
+        r = requests.post(TELEGRAM_API + "/sendPhoto", json={
+            "chat_id": chat_id,
+            "photo": foto_url,
+            "caption": cap,
+            "parse_mode": modo,
+        }, timeout=20)
+        d = r.json()
+        if d.get("ok"):
+            return d["result"]["message_id"]
+        logger.warning("[TG foto] " + str(d.get("description", "")) + " — fallback texto")
+        return enviar(chat_id, caption, modo)
+    except Exception as e:
+        logger.error("[TG foto] " + str(e))
+        return enviar(chat_id, caption, modo)
+
+
+# ─────────────────────────────────────────────
+# AFILIADOS
+# ─────────────────────────────────────────────
+
 def link_ml(url, item_id):
     base = url.split("?")[0].split("#")[0]
     return base + "?matt_tool=" + ML_AFFILIATE_ID
 
+
+# ─────────────────────────────────────────────
+# SCORE
+# ─────────────────────────────────────────────
 
 def score(descuento, stock, precio, cupon):
     s = 0.0
@@ -273,16 +309,24 @@ def score(descuento, stock, precio, cupon):
     elif descuento >= 0.15: s += 2.0
     elif descuento >= 0.05: s += 1.0
     else:                   s += 0.2
-    if stock == 1:          s += 2.0
-    elif stock <= 3:        s += 1.8
-    elif stock <= 10:       s += 1.0
-    if precio >= 8000:      s += 1.5
-    elif precio >= 3000:    s += 1.0
-    if cupon:               s += 1.0
+
+    if stock == 1:    s += 2.0
+    elif stock <= 3:  s += 1.8
+    elif stock <= 10: s += 1.0
+
+    if precio >= 8000:   s += 1.5
+    elif precio >= 3000: s += 1.0
+
+    if cupon: s += 1.0
     return min(10, round(s))
 
 
+# ─────────────────────────────────────────────
+# FORMATOS DE MENSAJE
+# ─────────────────────────────────────────────
+
 def msg_vip(item, stats):
+    """Mensaje VIP completo — para envío sin foto o como referencia."""
     nombre  = item["nombre"][:65]
     precio  = item["precio"]
     p_orig  = item["precio_orig"]
@@ -294,8 +338,8 @@ def msg_vip(item, stats):
     c_monto = item.get("cupon_monto", 0)
     p_cupon = item.get("precio_con_cupon", precio)
     hora    = datetime.now(TZ_MEXICO).strftime("%H:%M:%S")
-    rl      = p_orig * 0.80
-    rh      = p_orig * 0.92
+    rl = p_orig * 0.80
+    rh = p_orig * 0.92
 
     if sc >= 8 or item["descuento"] >= 0.50:
         icono = "🚨"; tag = "ERROR DE PRECIO - SOLO VIP"
@@ -306,17 +350,17 @@ def msg_vip(item, stats):
     else:
         icono = "⚡"; tag = "ALERTA VIP"
 
-    if stk == 1:         stxt = "*ULTIMA UNIDAD*"
-    elif stk <= 3:       stxt = "*Solo " + str(stk) + " unidades*"
-    elif stk <= 10:      stxt = str(stk) + " unidades"
-    else:                stxt = "Stock disponible"
+    if stk == 1:    stxt = "*ULTIMA UNIDAD*"
+    elif stk <= 3:  stxt = "*Solo " + str(stk) + " unidades*"
+    elif stk <= 10: stxt = str(stk) + " unidades"
+    else:           stxt = "Stock disponible"
 
     m  = icono + " *" + tag + "*\n\n"
     m += "*" + nombre + "*\n\n"
-    m += "Precio ahora:    *$" + "{:,.2f}".format(precio) + " MXN*\n"
+    m += "Precio ahora: *$" + "{:,.2f}".format(precio) + " MXN*\n"
     if p_orig > precio:
-        m += "Precio original:  $" + "{:,.2f}".format(p_orig) + " MXN\n"
-        m += "Descuento:       *-" + "{:.0f}".format(desc) + "%*\n"
+        m += "Precio original: $" + "{:,.2f}".format(p_orig) + " MXN\n"
+    m += "Descuento: *-" + "{:.0f}".format(desc) + "%*\n"
     if cupon and c_monto > 0:
         m += "\n🎟️ *Con cupon: $" + "{:,.2f}".format(p_cupon) + " MXN* (−$" + "{:,.0f}".format(c_monto) + " adicional)\n"
     if stats.get("es_minimo") and stats.get("dias", 0) >= 7:
@@ -334,6 +378,60 @@ def msg_vip(item, stats):
     return m
 
 
+def msg_vip_caption(item, stats):
+    """
+    Versión compacta del mensaje VIP para usar como caption de foto.
+    Max 1024 chars — muestra lo esencial de forma clara con la imagen.
+    """
+    nombre  = item["nombre"][:55]
+    precio  = item["precio"]
+    p_orig  = item["precio_orig"]
+    desc    = item["descuento"] * 100
+    stk     = item["stock"]
+    lnk     = link_ml(item["url"], item["id"])
+    sc      = item["score"]
+    cupon   = item.get("tiene_cupon", False)
+    c_monto = item.get("cupon_monto", 0)
+    p_cupon = item.get("precio_con_cupon", precio)
+    hora    = datetime.now(TZ_MEXICO).strftime("%H:%M")
+    rl = p_orig * 0.80
+    rh = p_orig * 0.92
+
+    if sc >= 8 or item["descuento"] >= 0.50:
+        icono = "🚨"; tag = "ERROR DE PRECIO — SOLO VIP"
+    elif item["descuento"] >= DESCUENTO_HOT:
+        icono = "🔥"; tag = "HOT DEAL — EXCLUSIVO VIP"
+    elif cupon:
+        icono = "🎟️"; tag = "OFERTA + CUPÓN — VIP"
+    else:
+        icono = "⚡"; tag = "ALERTA VIP"
+
+    if stk == 1:    stxt = "*ÚLTIMA UNIDAD*"
+    elif stk <= 3:  stxt = f"*Solo {stk} unidades*"
+    elif stk <= 10: stxt = f"{stk} unidades"
+    else:           stxt = ""
+
+    m  = f"{icono} *{tag}*\n\n"
+    m += f"*{nombre}*\n\n"
+    m += f"*${precio:,.0f} MXN* (−{desc:.0f}%)\n"
+    if p_orig > precio:
+        m += f"Normal: ${p_orig:,.0f}\n"
+    if cupon and c_monto > 0:
+        m += f"🎟️ Con cupón: *${p_cupon:,.0f}*\n"
+    if stats.get("es_minimo") and stats.get("dias", 0) >= 7:
+        m += f"\n_Precio más bajo en {stats['dias']} días_\n"
+    if stxt:
+        m += f"\n{stxt}\n"
+    if desc >= 30 or stk <= 3:
+        m += "_Podría terminar pronto_\n"
+    m += f"\nScore: {sc}/10"
+    if p_orig > precio:
+        m += f"\n_Reventa est: ${rl:,.0f}–${rh:,.0f}_"
+    m += f"\n_{hora} MX_\n\n"
+    m += f"[COMPRAR AHORA]({lnk})"
+    return m[:1024]
+
+
 def msg_free(item):
     nombre  = item["nombre"][:55]
     precio  = item["precio"]
@@ -346,10 +444,10 @@ def msg_free(item):
     c_monto = item.get("cupon_monto", 0)
     p_cupon = item.get("precio_con_cupon", precio)
 
-    if sc >= 7:     icono = "🚨"
-    elif sc >= 5:   icono = "🔥"
-    elif cupon:     icono = "🎟️"
-    else:           icono = "⚡"
+    if sc >= 7:   icono = "🚨"
+    elif sc >= 5: icono = "🔥"
+    elif cupon:   icono = "🎟️"
+    else:         icono = "⚡"
 
     m  = icono + " <b>" + nombre + "</b>\n\n"
     m += "<b>$" + "{:,.2f}".format(precio) + " MXN</b>"
@@ -368,6 +466,10 @@ def msg_free(item):
         m += "<a href=\"" + LAUNCHPASS_LINK + "\">📲 Pasar al canal DropNode VIP</a>"
     return m
 
+
+# ─────────────────────────────────────────────
+# PROCESAMIENTO
+# ─────────────────────────────────────────────
 
 def procesar(prod_raw):
     try:
@@ -394,19 +496,22 @@ def procesar(prod_raw):
         if cupon and c_monto > 0:
             descuento = max(descuento, c_monto / precio)
 
-        pid   = upsert_prod(link, nombre, "ML Ofertas", item_id)
+        pid = upsert_prod(link, nombre, "ML Ofertas", item_id)
         guardar_precio(pid, precio, p_orig or precio, stk)
         if alerta_hoy(pid):
             return None
 
-        sc    = score(descuento, stk, precio, cupon)
+        sc = score(descuento, stk, precio, cupon)
         stats = get_stats(pid, precio)
+
+        # Usar imagen de mayor resolución si está disponible
+        thumb_hd = thumb.replace("I.jpg", "O.jpg") if thumb else ""
 
         return {
             "id": item_id, "pid": pid, "nombre": nombre,
             "precio": precio, "precio_orig": p_orig or precio,
             "descuento": descuento, "stock": stk,
-            "url": link, "thumbnail": thumb,
+            "url": link, "thumbnail": thumb_hd or thumb,
             "score": sc, "stats": stats,
             "tiene_cupon": cupon, "cupon_monto": c_monto,
             "precio_con_cupon": p_cupon
@@ -415,9 +520,13 @@ def procesar(prod_raw):
         return None
 
 
+# ─────────────────────────────────────────────
+# MAIN
+# ─────────────────────────────────────────────
+
 def main():
     hora_mx = datetime.now(TZ_MEXICO)
-    hora    = hora_mx.hour
+    hora = hora_mx.hour
     logger.info("[GITHUB v6] " + hora_mx.strftime("%d/%m %H:%M") + " MX")
 
     es_horario_free = HORA_FREE_INICIO <= hora < HORA_FREE_FIN
@@ -427,8 +536,8 @@ def main():
     with sync_playwright() as pw:
         browser = pw.chromium.launch(
             headless=True,
-            args=["--no-sandbox","--disable-setuid-sandbox",
-                  "--disable-dev-shm-usage","--disable-gpu"]
+            args=["--no-sandbox", "--disable-setuid-sandbox",
+                  "--disable-dev-shm-usage", "--disable-gpu"]
         )
         context = browser.new_context(
             user_agent=random.choice(USER_AGENTS),
@@ -453,75 +562,91 @@ def main():
     unicos.sort(key=lambda x: x["score"], reverse=True)
     logger.info("[GITHUB] Productos unicos: " + str(len(unicos)))
 
-    vip_n = 0
+    vip_n  = 0
     free_n = 0
     ids_vip = set()
 
-    # VIP primero
+    # ── VIP primero ──
     for item in unicos:
         if vip_n >= MAX_VIP:
             break
         if es_madrugada and item["descuento"] < DESCUENTO_HOT:
             continue
-        mid = enviar(CHANNEL_VIP_ID, msg_vip(item, item.get("stats", {})))
+
+        thumb   = item.get("thumbnail", "")
+        caption = msg_vip_caption(item, item.get("stats", {}))
+
+        # Enviar con foto si hay thumbnail válido, texto completo como fallback
+        if thumb and len(thumb) > 10 and thumb.startswith("http"):
+            mid = enviar_foto(CHANNEL_VIP_ID, thumb, caption)
+        else:
+            mid = enviar(CHANNEL_VIP_ID, msg_vip(item, item.get("stats", {})))
+
         if mid:
-            guardar_alerta(item.get("pid"), item["score"], "vip", item["precio"], item["descuento"])
+            guardar_alerta(item.get("pid"), item["score"], "vip",
+                           item["precio"], item["descuento"])
             ids_vip.add(item["id"])
             vip_n += 1
+
+            # Webhook Make para score alto
             if item["score"] >= 8 and MAKE_WEBHOOK_URL:
                 try:
                     requests.post(MAKE_WEBHOOK_URL, json={
-                        "nombre": item["nombre"][:80],
-                        "precio": str(round(item["precio"])),
+                        "nombre":    item["nombre"][:80],
+                        "precio":    str(round(item["precio"])),
                         "descuento": str(round(item["descuento"] * 100)),
                         "thumbnail": item.get("thumbnail", ""),
-                        "link": item["url"], "score": item["score"]
+                        "link":      item["url"],
+                        "score":     item["score"]
                     }, timeout=10)
                 except Exception:
                     pass
-            time.sleep(5)
 
-    # Esperar ventaja de tiempo
+        time.sleep(5)
+
+    # ── Esperar ventaja de tiempo antes del free ──
     if vip_n > 0 and es_horario_free:
         logger.info("[GITHUB] Esperando " + str(VENTAJA_SEG // 60) + " min antes del free...")
         time.sleep(VENTAJA_SEG)
 
-    # Free - siempre tiene contenido (score >= 2, o lo que haya)
+    # ── Free ──
     if es_horario_free:
         candidatos = [x for x in unicos if x["score"] >= 2][:MAX_FREE]
         if not candidatos and unicos:
             candidatos = unicos[:MAX_FREE]
+
         for item in candidatos:
             mid = enviar(CHANNEL_FREE_ID, msg_free(item), "HTML")
             if mid:
-                guardar_alerta(item.get("pid"), item["score"], "free", item["precio"], item["descuento"])
+                guardar_alerta(item.get("pid"), item["score"], "free",
+                               item["precio"], item["descuento"])
                 free_n += 1
-                time.sleep(6)
+            time.sleep(6)
 
-        # Resumen si no hubo alertas a mediodia o 7pm
-        if free_n == 0 and hora in (12, 19) and unicos:
-            top = unicos[:5]
-            titulo = "Mejores precios de la tarde" if hora >= 15 else "Mejores precios de la manana"
-            msg = "📋 <b>" + titulo + " — DropNode MX</b>\n\n"
-            msg += "<i>Nuestro equipo reviso miles de productos. Estos destacan:</i>\n\n"
-            for i, it in enumerate(top, 1):
-                lnk = link_ml(it["url"], it["id"])
-                d   = it["descuento"] * 100
-                ln  = str(i) + ". 🔥 <b>" + it["nombre"][:50] + "</b>\n"
-                ln += "   <b>$" + "{:,.2f}".format(it["precio"]) + " MXN</b>"
-                if d >= 5:
-                    ln += " (-" + "{:.0f}".format(d) + "%)"
-                if it.get("tiene_cupon"):
-                    ln += " 🎟️"
-                ln += "   <a href=\"" + link_ml(it["url"], it["id"]) + "\">Ver oferta</a>"
-                msg += ln + "\n\n"
-            if LAUNCHPASS_LINK:
-                msg += "🔒 <i>Los VIP los vieron primero con analisis completo.</i>\n"
-                msg += "<a href=\"" + LAUNCHPASS_LINK + "\">📲 Pasar al canal DropNode VIP</a>"
-            enviar(CHANNEL_FREE_ID, msg, "HTML")
-            free_n += 1
+    # ── Resumen si no hubo alertas a mediodía o 7pm ──
+    if free_n == 0 and hora in (12, 19) and unicos:
+        top    = unicos[:5]
+        titulo = "Mejores precios de la tarde" if hora >= 15 else "Mejores precios de la manana"
+        msg    = "📋 <b>" + titulo + " — DropNode MX</b>\n\n"
+        msg   += "<i>Nuestro equipo reviso miles de productos. Estos destacan:</i>\n\n"
+        for i, it in enumerate(top, 1):
+            lnk = link_ml(it["url"], it["id"])
+            d   = it["descuento"] * 100
+            ln  = str(i) + ". 🔥 <b>" + it["nombre"][:50] + "</b>\n"
+            ln += "   <b>$" + "{:,.2f}".format(it["precio"]) + " MXN</b>"
+            if d >= 5:
+                ln += " (-" + "{:.0f}".format(d) + "%)"
+            if it.get("tiene_cupon"):
+                ln += " 🎟️"
+            ln += " <a href=\"" + lnk + "\">Ver oferta</a>"
+            msg += ln + "\n\n"
+        if LAUNCHPASS_LINK:
+            msg += "🔒 <i>Los VIP los vieron primero con analisis completo.</i>\n"
+            msg += "<a href=\"" + LAUNCHPASS_LINK + "\">📲 Pasar al canal DropNode VIP</a>"
+        enviar(CHANNEL_FREE_ID, msg, "HTML")
+        free_n += 1
 
-    # Buenos dias VIP a las 7am
+    # ── Buenos días VIP ──
     if hora == 7 and vip_n == 0:
         enviar(CHANNEL_VIP_ID,
                "🌅 *Buenos dias — DropNode VIP*\n\nYa estamos monitoreando. "
