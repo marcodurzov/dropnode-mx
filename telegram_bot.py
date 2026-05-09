@@ -636,19 +636,22 @@ def canal_free_tiene_fijado():
 
 
 def setup_canal_free():
-    texto = (
+        texto = (
         "<b>DropNode MX — Descuentos reales que valen la pena</b>\n\n"
-        "Nuestro equipo monitorea miles de productos en tiempo real.\n"
-        "Solo publicamos cuando el descuento es genuino.\n\n"
+        "Nuestro equipo revisa miles de productos todos los días.\n"
+        "Solo publicamos lo que nosotros mismos compraríamos.\n\n"
         "<b>Qué encontrarás aquí:</b>\n"
-        "Alertas de descuentos verificados diariamente\n"
-        "Errores de precio detectados automáticamente\n"
-        "Cupones activos combinados con ofertas\n\n"
+        "Descuentos verificados y corroborados por el equipo\n"
+        "Ofertas seleccionadas de las principales tiendas de México\n"
+        "Cupones activos combinados con precios bajos\n\n"
         "<b>Canal VIP ($299 MXN/mes):</b>\n"
-        "Alertas 30 min antes que este canal\n"
+        "Alertas en tiempo real — antes que este canal\n"
+        "Productos y errores de precio que nunca llegan aquí\n"
         "Análisis de reventa incluido en cada alerta\n"
-        "Errores de precio exclusivos no publicados aquí\n\n"
+        "Acceso a oportunidades que el canal público no ve\n\n"
         "<i>DropNode MX — Siempre encontramos el mejor precio.</i>"
+    )
+
     )
     payload = {
         "chat_id":                  CHANNEL_FREE_ID,
