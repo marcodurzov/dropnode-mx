@@ -1,10 +1,8 @@
 # =============================================================
-# DROPNODE MX — main.py v2.4 Railway
-# ML scraping movido a GitHub Actions
-# Railway: Walmart, Liverpool, Coppel, Amazon, SHEIN,
-#          AliExpress, Marcas electrónicas, TikTok trending
-# + Setup de canal free al iniciar
-# + Verificación de peticiones en cada ciclo
+# DROPNODE MX — main.py v2.5 Railway
+# + Cola FOMO: free recibe 2 ciclos después que VIP
+# + Selección: 1 high-score + hasta 2 más por ciclo al free
+# + Mensaje free menciona siempre que llegó antes al VIP
 # =============================================================
 
 import schedule, time, logging, sys
@@ -65,6 +63,13 @@ def dentro_de_horario():
 contadores   = {"vip": 0, "free": 0, "fecha": hora_mx().date()}
 ciclo_numero = 0
 
+# ── Cola FOMO ──────────────────────────────────────────────
+# Items en espera para envío retrasado al canal free.
+# Estructura: {item, ciclo_agregado, n_vip_ese_ciclo, score}
+_cola_free   = []
+_CICLOS_DELAY = 2   # Ciclos a esperar antes de enviar al free (2 × 15min = 30min)
+_MAX_FREE_POR_CICLO = 3   # Máximo a enviar al free por ciclo (1 top + 2 más)
+
 EMOJIS = {
     "walmart":      "🛒",
     "liverpool":    "🏬",
@@ -91,9 +96,15 @@ def resetear():
     hoy = hora_mx().date()
     if contadores["fecha"] != hoy:
         contadores.update({"vip": 0, "free": 0, "fecha": hoy})
+        _cola_free.clear()
 
 
-def formatear_externa(item):
+# ─────────────────────────────────────────────
+# FORMATO MENSAJES EXTERNOS
+# ─────────────────────────────────────────────
+
+def formatear_externa_vip(item):
+    """Mensaje VIP para scrapers externos (Walmart, Liverpool, etc.)"""
     tienda   = item["tienda"]
     nombre   = item["nombre"][:60]
     precio   = item["precio_actual"]
@@ -102,40 +113,146 @@ def formatear_externa(item):
     url      = item["url"]
     et       = EMOJIS.get(tienda, "🛍️")
     ec       = item["categoria"]["emoji"]
+    tienda_d = tienda.upper() if tienda in (
+        "samsung", "sony", "lg", "lenovo", "dell", "hp",
+        "asus", "xiaomi", "ghia", "hisense", "tcl"
+    ) else tienda.capitalize()
+    rl = precio_o * 0.78
+    rh = precio_o * 0.90
 
-    tienda_display = tienda.upper() if tienda in (
+    return (
+        f"{et} *{tienda_d} — OFERTA EXCLUSIVA* {ec}\n\n"
+        f"*{nombre}*\n\n"
+        f"*${precio:,.0f} MXN* (-{desc:.0f}%)\n"
+        f"Normal: ${precio_o:,.0f} MXN\n\n"
+        f"[COMPRAR AHORA]({url})\n\n"
+        f"_Reventa estimada: ${rl:,.0f} - ${rh:,.0f} MXN_"
+    )
+
+
+def formatear_externa_free_fomo(item, n_vip_ese_ciclo, n_exclusivos, delay_min):
+    """
+    Mensaje FOMO para el canal free.
+    Llega siempre con delay de 2 ciclos (30 min) vs VIP.
+    Menciona cuánto tiempo lleva en VIP y qué se perdió.
+    """
+    tienda   = item["tienda"]
+    nombre   = item["nombre"][:55]
+    precio   = item["precio_actual"]
+    precio_o = item["precio_original"]
+    desc     = item["descuento"] * 100
+    url      = item["url"]
+    et       = EMOJIS.get(tienda, "🛍️")
+    ec       = item["categoria"]["emoji"]
+    tienda_d = tienda.upper() if tienda in (
         "samsung", "sony", "lg", "lenovo", "dell", "hp",
         "asus", "xiaomi", "ghia", "hisense", "tcl"
     ) else tienda.capitalize()
 
-    free = (
-        f"{et} *OFERTA {tienda_display}* {ec}\n\n"
-        f"*{nombre}*\n\n"
-        f"*${precio:,.0f} MXN* (-{desc:.0f}%)\n"
-        f"Antes: ${precio_o:,.0f} MXN\n\n"
-        f"[Ver producto]({url})\n\n"
-        f"_Nuestro equipo lo encontro._"
-    )
-    vip = None
-    if item["descuento"] >= 0.35:
-        rl = precio_o * 0.78
-        rh = precio_o * 0.90
-        vip = (
-            f"🔥 *{tienda_display} — OFERTA EXCLUSIVA* {ec}\n\n"
-            f"*{nombre}*\n\n"
-            f"*${precio:,.0f} MXN* (-{desc:.0f}%)\n"
-            f"Normal: ${precio_o:,.0f} MXN\n\n"
-            f"[COMPRAR AHORA]({url})\n\n"
-            f"_Reventa estimada: ${rl:,.0f} - ${rh:,.0f} MXN_"
-        )
-    return free, vip
+    # Texto de tiempo transcurrido
+    if delay_min < 60:
+        delay_txt = f"{delay_min} minutos"
+    else:
+        h = delay_min // 60
+        delay_txt = f"{h} hora{'s' if h > 1 else ''}"
+
+    m  = f"{et} <b>OFERTA {tienda_d}</b> {ec}\n\n"
+    m += f"<b>{nombre}</b>\n\n"
+    m += f"<b>${precio:,.0f} MXN</b> (-{desc:.0f}%)\n"
+    if precio_o > precio:
+        m += f"<s>${precio_o:,.0f}</s>\n"
+    m += f"\n<a href=\"{url}\">Ver oferta</a>\n\n"
+
+    # Bloque FOMO — siempre presente
+    m += f"<i>Esta alerta llegó al Canal VIP hace {delay_txt} con análisis de reventa completo.</i>\n"
+    if n_exclusivos > 0:
+        m += (f"<i>En ese mismo ciclo hubo "
+              f"{n_exclusivos} oportunidad{'es' if n_exclusivos > 1 else ''} "
+              f"exclusiva{'s' if n_exclusivos > 1 else ''} que no llegaron aquí.</i>\n")
+    m += "<i>Los miembros VIP actúan primero — la ventana de tiempo importa.</i>\n"
+
+    if LAUNCHPASS_LINK:
+        m += f"\n<a href=\"{LAUNCHPASS_LINK}\">📲 Unirse al Canal VIP — $299/mes</a>"
+    return m
 
 
-def procesar_externa(items, max_a=2):
-    publicadas = 0
+# ─────────────────────────────────────────────
+# COLA FOMO
+# ─────────────────────────────────────────────
+
+def agregar_a_cola(item, score, n_vip_ese_ciclo):
+    """Encola un item para enviarse al free en ciclos posteriores."""
+    _cola_free.append({
+        "item":    item,
+        "ciclo":   ciclo_numero,
+        "n_vip":   n_vip_ese_ciclo,
+        "score":   score,
+    })
+
+
+def procesar_cola_free():
+    """
+    Revisa la cola y envía al free los items que llevan >= _CICLOS_DELAY ciclos.
+    Selección: 1 de mayor score + hasta 2 más.
+    """
+    if not _cola_free:
+        return
+
+    ahora  = ciclo_numero
+    listos = [x for x in _cola_free if ahora - x["ciclo"] >= _CICLOS_DELAY]
+    if not listos:
+        return
+
+    # Limpiar los listos de la cola
+    for x in listos:
+        if x in _cola_free:
+            _cola_free.remove(x)
+
+    # Limpiar también los muy viejos (> 8 ciclos = 2h) sin enviar
+    viejos = [x for x in _cola_free if ahora - x["ciclo"] > 8]
+    for x in viejos:
+        if x in _cola_free:
+            _cola_free.remove(x)
+
+    # Ordenar por score descendente
+    listos.sort(key=lambda x: x["score"], reverse=True)
+
+    # Seleccionar: 1 top + hasta 2 más = máximo 3
+    seleccionados  = [listos[0]]
+    seleccionados += listos[1:_MAX_FREE_POR_CICLO]
+
+    # Cuántas oportunidades NO van al free (exclusivas VIP)
+    n_excl_total = sum(x["n_vip"] for x in listos) - len(seleccionados)
+    n_excl_total = max(0, n_excl_total)
+
+    logger.info(f"[COLA FREE] Enviando {len(seleccionados)} de {len(listos)} listos")
+
+    for i, entrada in enumerate(seleccionados):
+        item      = entrada["item"]
+        n_vip     = entrada["n_vip"]
+        delay_min = (ahora - entrada["ciclo"]) * 15
+
+        # Solo mencionar exclusivos en el primero del lote
+        n_excl = n_excl_total if i == 0 else 0
+
+        msg = formatear_externa_free_fomo(item, n_vip, n_excl, delay_min)
+        enviar_mensaje(CHANNEL_FREE_ID, msg, parse_mode="HTML")
+        contadores["free"] += 1
+        time.sleep(6)
+
+
+# ─────────────────────────────────────────────
+# CICLO PRINCIPAL
+# ─────────────────────────────────────────────
+
+def procesar_externa(items, max_vip=2):
+    """
+    Envía al VIP directamente si el score lo amerita.
+    Agrega a la cola del free — NO envía al free directamente.
+    """
+    vip_este_ciclo = 0
+
     for item in items:
-        if publicadas >= max_a:
-            break
         score = calcular_heat_score(
             descuento_real=item["descuento"],
             stock=99,
@@ -146,21 +263,23 @@ def procesar_externa(items, max_a=2):
         if score < 3:
             continue
 
-        # Verificar si este producto cumple alguna petición de la comunidad
+        # Check peticiones de la comunidad
         try:
             verificar_match(item["nombre"], item["url"], item["precio_actual"])
         except Exception:
             pass
 
-        free, vip = formatear_externa(item)
-        if vip:
-            enviar_mensaje(CHANNEL_VIP_ID, vip)
+        # VIP: directo si score alto y no superamos el límite del ciclo
+        if score >= 6 and vip_este_ciclo < max_vip:
+            enviar_mensaje(CHANNEL_VIP_ID, formatear_externa_vip(item))
             contadores["vip"] += 1
+            vip_este_ciclo += 1
             time.sleep(3)
-        enviar_mensaje(CHANNEL_FREE_ID, free)
-        contadores["free"] += 1
-        publicadas += 1
-        time.sleep(6)
+
+        # Encolar para el free (todos los que pasaron score >= 3)
+        agregar_a_cola(item, score, vip_este_ciclo)
+
+    return vip_este_ciclo
 
 
 def ciclo_externas():
@@ -183,7 +302,10 @@ def ciclo_externas():
         elif turno == 7: procesar_externa(ciclo_marcas(),     2)
         elif turno == 0: procesar_externa(ciclo_tiktok(),     2)
 
-        logger.info(f"[CICLO] VIP:{contadores['vip']} Free:{contadores['free']}")
+        # Procesar cola del free SIEMPRE al final del ciclo
+        procesar_cola_free()
+
+        logger.info(f"[CICLO] VIP:{contadores['vip']} Free:{contadores['free']} Cola:{len(_cola_free)}")
     except Exception as e:
         logger.error(f"[ERROR] {e}", exc_info=True)
 
@@ -229,25 +351,23 @@ def configurar():
     schedule.every().hour.do(ejecutar_community_manager)
 
     logger.info("Railway: Walmart|Liverpool|Coppel|Amazon|AliExpress|SHEIN|Marcas|TikTok")
-    logger.info("ML scraping: GitHub Actions (cada 30 min)")
-    logger.info("Peticiones: activo — loop cerrado comunidad → VIP")
+    logger.info("ML: GitHub Actions cada 30min")
+    logger.info("Free channel: cola FOMO — delay 2 ciclos (30min)")
 
 
 if __name__ == "__main__":
     logger.info(
         f"\n{'='*50}\n"
-        f" DROPNODE MX v2.4 — {hora_mx().strftime('%d/%m/%Y %H:%M')} MX\n"
+        f" DROPNODE MX v2.5 — {hora_mx().strftime('%d/%m/%Y %H:%M')} MX\n"
         f"{'='*50}\n"
     )
 
-    # ── Setup inicial de canales ──
     if not grupo_tiene_fijado():
         enviar_y_fijar_bienvenida_grupo()
 
     if not canal_free_tiene_fijado():
         setup_canal_free()
 
-    # ── Primer ciclo inmediato ──
     ciclo_externas()
     configurar()
     logger.info("\nSistema activo.\n")
