@@ -1,5 +1,5 @@
 # =============================================================
-# DROPNODE MX — config.py  (v1.9)
+# DROPNODE MX — config.py   (v1.9)
 # + Timezone Mexico City (UTC-6)
 # + Umbrales ajustados para generar contenido diario
 # + Multiples tiendas activadas
