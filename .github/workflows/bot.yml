@@ -1,0 +1,47 @@
+name: DropNode Bot
+
+on:
+  schedule:
+    # Corre cada 15 minutos, las 24 horas
+    # El script verifica internamente si está en horario de publicación (8 AM - 10 PM MX)
+    - cron: '*/15 * * * *'
+  # Permite correrlo manualmente desde GitHub → Actions → DropNode Bot → Run workflow
+  workflow_dispatch:
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12   # Máximo 12 min por run — si algo se cuelga, se cancela solo
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Instalar dependencias
+        run: pip install -r requirements.txt
+
+      - name: Ejecutar bot
+        run: python main.py
+        env:
+          TELEGRAM_TOKEN:            ${{ secrets.TELEGRAM_TOKEN }}
+          CHANNEL_FREE_ID:           ${{ secrets.CHANNEL_FREE_ID }}
+          CHANNEL_VIP_ID:            ${{ secrets.CHANNEL_VIP_ID }}
+          GROUP_ID:                  ${{ secrets.GROUP_ID }}
+          SUPABASE_URL:              ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY:              ${{ secrets.SUPABASE_KEY }}
+          LAUNCHPASS_LINK:           ${{ secrets.LAUNCHPASS_LINK }}
+          ML_AFFILIATE_ID:           ${{ secrets.ML_AFFILIATE_ID }}
+          AMAZON_TAG:                ${{ secrets.AMAZON_TAG }}
+          EBAY_CAMPAIGN_ID:          ${{ secrets.EBAY_CAMPAIGN_ID }}
+          EBAY_CUSTOM_ID:            ${{ secrets.EBAY_CUSTOM_ID }}
+          MAKE_WEBHOOK_URL:          ${{ secrets.MAKE_WEBHOOK_URL }}
+          HORA_INICIO_ENVIOS:        "8"
+          HORA_FIN_ENVIOS:           "22"
+          TIMEZONE_OFFSET_HOURS:     "-6"
+          FRECUENCIA_AUTOLEARNING_HORAS: "24"
