@@ -51,7 +51,8 @@ def upsert_prod(url, nombre, categoria, sku):
         ).execute()
         if r.data:
             return r.data[0]["id"]
-        r2 = db.table("productos").select("id").eq("sku", sku).eq("tienda", "mercadolibre").execute()
+        r2 = db.table("productos").select("id").eq("sku", sku).eq(
+            "tienda", "mercadolibre").execute()
         return r2.data[0]["id"] if r2.data else None
     except Exception as e:
         logger.error("[DB upsert] " + str(e)[:80])
@@ -64,8 +65,9 @@ def guardar_precio(pid, precio, precio_orig, stock):
     try:
         db.table("historial_precios").insert({
             "producto_id": pid, "precio": precio,
-            "precio_original": precio_orig, "stock": stock,
-            "disponible": stock > 0,
+            "precio_original": precio_orig,
+            "stock": stock if stock else 0,
+            "disponible": True,
             "timestamp": datetime.utcnow().isoformat()
         }).execute()
     except Exception as e:
@@ -77,7 +79,8 @@ def alerta_hoy(pid):
         return False
     try:
         desde = datetime.utcnow().replace(hour=0, minute=0, second=0).isoformat()
-        r = db.table("alertas_enviadas").select("id").eq("producto_id", pid).gte("timestamp", desde).execute()
+        r = db.table("alertas_enviadas").select("id").eq(
+            "producto_id", pid).gte("timestamp", desde).execute()
         return len(r.data) > 0
     except Exception:
         return False
@@ -110,9 +113,11 @@ def get_stats(pid, precio_actual):
         primer  = datetime.fromisoformat(regs[0]["timestamp"].replace("Z", ""))
         dias    = (datetime.utcnow() - primer).days + 1
         min_p   = min(precios)
-        return {"min": min_p, "max": max(precios),
-                "avg": sum(precios) / len(precios), "dias": dias,
-                "es_minimo": precio_actual <= min_p * 1.02 and dias >= 7}
+        return {
+            "min": min_p, "max": max(precios),
+            "avg": sum(precios) / len(precios), "dias": dias,
+            "es_minimo": precio_actual <= min_p * 1.02 and dias >= 7
+        }
     except Exception:
         return {}
 
@@ -126,33 +131,56 @@ HORA_FREE_FIN    = 22
 DESCUENTO_HOT    = 0.35
 MAX_VIP          = 12
 MAX_FREE         = 4
-VENTAJA_SEG      = 180   # 3 min de ventaja VIP sobre free
+VENTAJA_SEG      = 180
+
+PAGINAS_FLASH = [
+    {"url": "https://www.mercadolibre.com.mx/ofertas/solo-hoy",
+     "nombre": "Solo Hoy", "emoji": "⏰", "es_flash": True},
+    {"url": "https://www.mercadolibre.com.mx/ofertas/solo-hoy?page=2",
+     "nombre": "Solo Hoy p2", "emoji": "⏰", "es_flash": True},
+    {"url": "https://www.mercadolibre.com.mx/remates",
+     "nombre": "Remates", "emoji": "💥", "es_flash": True},
+    {"url": "https://www.mercadolibre.com.mx/ofertas?deal_type=DAILY_DEAL",
+     "nombre": "Oferta del Dia", "emoji": "📅", "es_flash": True},
+]
 
 PAGINAS_BASE = [
-    {"url": "https://www.mercadolibre.com.mx/ofertas",        "nombre": "Ofertas p1", "emoji": "🔥"},
-    {"url": "https://www.mercadolibre.com.mx/ofertas?page=2", "nombre": "Ofertas p2", "emoji": "🔥"},
-    {"url": "https://www.mercadolibre.com.mx/ofertas?page=3", "nombre": "Ofertas p3", "emoji": "🔥"},
-    {"url": "https://www.mercadolibre.com.mx/ofertas?page=4", "nombre": "Ofertas p4", "emoji": "🔥"},
-    {"url": "https://www.mercadolibre.com.mx/ofertas?page=5", "nombre": "Ofertas p5", "emoji": "🔥"},
-    {"url": "https://www.mercadolibre.com.mx/ofertas?page=6", "nombre": "Ofertas p6", "emoji": "🔥"},
-    {"url": "https://www.mercadolibre.com.mx/ofertas?page=7", "nombre": "Ofertas p7", "emoji": "🔥"},
-    {"url": "https://www.mercadolibre.com.mx/ofertas?page=8", "nombre": "Ofertas p8", "emoji": "🔥"},
+    {"url": "https://www.mercadolibre.com.mx/ofertas",
+     "nombre": "Ofertas p1", "emoji": "🔥", "es_flash": False},
+    {"url": "https://www.mercadolibre.com.mx/ofertas?page=2",
+     "nombre": "Ofertas p2", "emoji": "🔥", "es_flash": False},
+    {"url": "https://www.mercadolibre.com.mx/ofertas?page=3",
+     "nombre": "Ofertas p3", "emoji": "🔥", "es_flash": False},
+    {"url": "https://www.mercadolibre.com.mx/ofertas?page=4",
+     "nombre": "Ofertas p4", "emoji": "🔥", "es_flash": False},
+    {"url": "https://www.mercadolibre.com.mx/ofertas?page=5",
+     "nombre": "Ofertas p5", "emoji": "🔥", "es_flash": False},
+    {"url": "https://www.mercadolibre.com.mx/ofertas?page=6",
+     "nombre": "Ofertas p6", "emoji": "🔥", "es_flash": False},
 ]
 
 PAGINAS_CAT = [
-    {"url": "https://www.mercadolibre.com.mx/ofertas/electronica",  "nombre": "Electronica",  "emoji": "🔌"},
-    {"url": "https://www.mercadolibre.com.mx/ofertas/celulares",    "nombre": "Celulares",    "emoji": "📱"},
-    {"url": "https://www.mercadolibre.com.mx/ofertas/computacion",  "nombre": "Computacion",  "emoji": "💻"},
-    {"url": "https://www.mercadolibre.com.mx/ofertas/juguetes",     "nombre": "Juguetes",     "emoji": "🧸"},
-    {"url": "https://www.mercadolibre.com.mx/ofertas/bebes",        "nombre": "Bebes",        "emoji": "👶"},
-    {"url": "https://www.mercadolibre.com.mx/ofertas/mascotas",     "nombre": "Mascotas",     "emoji": "🐾"},
-    {"url": "https://www.mercadolibre.com.mx/ofertas/deportes",     "nombre": "Deportes",     "emoji": "⚽"},
-    {"url": "https://www.mercadolibre.com.mx/ofertas/hogar",        "nombre": "Hogar",        "emoji": "🏠"},
+    {"url": "https://www.mercadolibre.com.mx/ofertas/electronica",
+     "nombre": "Electronica", "emoji": "🔌", "es_flash": False},
+    {"url": "https://www.mercadolibre.com.mx/ofertas/celulares",
+     "nombre": "Celulares", "emoji": "📱", "es_flash": False},
+    {"url": "https://www.mercadolibre.com.mx/ofertas/computacion",
+     "nombre": "Computacion", "emoji": "💻", "es_flash": False},
+    {"url": "https://www.mercadolibre.com.mx/ofertas/juguetes",
+     "nombre": "Juguetes", "emoji": "🧸", "es_flash": False},
+    {"url": "https://www.mercadolibre.com.mx/ofertas/bebes",
+     "nombre": "Bebes", "emoji": "👶", "es_flash": False},
+    {"url": "https://www.mercadolibre.com.mx/ofertas/mascotas",
+     "nombre": "Mascotas", "emoji": "🐾", "es_flash": False},
+    {"url": "https://www.mercadolibre.com.mx/ofertas/deportes",
+     "nombre": "Deportes", "emoji": "⚽", "es_flash": False},
+    {"url": "https://www.mercadolibre.com.mx/ofertas/hogar",
+     "nombre": "Hogar", "emoji": "🏠", "es_flash": False},
 ]
 
 _hora_run = _dt.datetime.utcnow().hour
 _idx      = (_hora_run // 2) % len(PAGINAS_CAT)
-PAGINAS   = PAGINAS_BASE + PAGINAS_CAT[_idx:_idx + 2]
+PAGINAS   = PAGINAS_FLASH + PAGINAS_BASE + PAGINAS_CAT[_idx:_idx + 2]
 
 USER_AGENTS = [
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/124.0.0.0 Safari/537.36",
@@ -164,6 +192,7 @@ JS_EXTRACT = """
     var productos = [];
     var cards = document.querySelectorAll('.poly-card');
     if (cards.length === 0) cards = document.querySelectorAll('.andes-card');
+    if (cards.length === 0) cards = document.querySelectorAll('[class*="ui-search-result"]');
 
     function parsePrecio(card) {
         var frac = card.querySelector('[class*="price__fraction"],[class*="amount__fraction"],[class*="price-tag-fraction"]');
@@ -192,14 +221,40 @@ JS_EXTRACT = """
 
     function parseStock(card) {
         var html = card.innerHTML.toLowerCase();
-        var match = html.match(/(\d+)\s*(unidad|pieza|disponible)/);
-        if (match) {
-            var n = parseInt(match[1]);
-            if (n > 0 && n < 50) return n;
-        }
-        if (html.indexOf("última unidad") >= 0 || html.indexOf("ultima unidad") >= 0) return 1;
-        if (html.indexOf("pocas unidades") >= 0) return 3;
+        if (html.indexOf("ltima unidad") >= 0 || html.indexOf("ltimo disponible") >= 0) return 1;
+        if (html.indexOf("pocas unidades") >= 0 || html.indexOf("ltimas unidades") >= 0) return 3;
+        var match = html.match(/(\d+)\s*(unidad|pieza)/);
+        if (match) { var n = parseInt(match[1]); if (n > 0 && n < 20) return n; }
         return null;
+    }
+
+    function detectFlash(card) {
+        var html = card.innerHTML.toLowerCase();
+        return html.indexOf("solo hoy") >= 0
+            || html.indexOf("remate") >= 0
+            || html.indexOf("flash") >= 0
+            || html.indexOf("oferta del d") >= 0;
+    }
+
+    function detectEnvioGratis(card) {
+        var html = card.innerHTML.toLowerCase();
+        return html.indexOf("env") >= 0 && (
+            html.indexOf("gratis") >= 0 ||
+            html.indexOf("full") >= 0 ||
+            html.indexOf("mismo d") >= 0
+        );
+    }
+
+    function getDescuentoPct(card) {
+        var html = card.innerHTML;
+        var m = html.match(/(\d{2,3})\s*%\s*(?:OFF|off|desc)/);
+        if (m) return parseInt(m[1]);
+        var badge = card.querySelector('[class*="discount"],[class*="rebates"],[class*="off"]');
+        if (badge) {
+            var bt = badge.textContent.match(/(\d{2,3})/);
+            if (bt) return parseInt(bt[1]);
+        }
+        return 0;
     }
 
     for (var i = 0; i < cards.length; i++) {
@@ -208,7 +263,7 @@ JS_EXTRACT = """
             var tEl = card.querySelector('[class*="title"],h2,h3');
             var titulo = tEl ? tEl.textContent.trim() : "";
             var precio = parsePrecio(card);
-            var origEl = card.querySelector('s,del,[class*="original"],[class*="regular-price"]');
+            var origEl = card.querySelector('s,del,[class*="original"],[class*="regular-price"],[class*="strike"]');
             var orig = 0;
             if (origEl) {
                 var of = origEl.querySelector('[class*="fraction"]');
@@ -217,6 +272,13 @@ JS_EXTRACT = """
                 } else {
                     var ot = origEl.textContent.replace(/[^0-9.,]/g,"").replace(/,([0-9]{3})/g,"$1");
                     if (ot.length >= 2 && ot.length <= 8) orig = parseFloat(ot);
+                }
+            }
+            // Si no detectamos precio original, intentar calcular desde % de descuento en badge
+            if (orig === 0 || orig <= precio) {
+                var dpct = getDescuentoPct(card);
+                if (dpct >= 15 && dpct < 90) {
+                    orig = Math.round(precio / (1 - dpct / 100));
                 }
             }
             var lEl = card.querySelector("a[href]");
@@ -232,16 +294,18 @@ JS_EXTRACT = """
                 var cm = html.match(/cup[^0-9]*([0-9]{2,5})/);
                 if (cm) cmonto = parseFloat(cm[1]);
             }
-            var stk = parseStock(card);
-            if (titulo && titulo.length > 5 && precio > 10 && precio < 200000 && link.indexOf("mercadolibre") >= 0) {
+            if (titulo && titulo.length > 5 && precio > 10 && precio < 200000
+                    && link.indexOf("mercadolibre") >= 0) {
                 productos.push({
-                    id: id, title: titulo.substring(0,100),
+                    id: id, title: titulo.substring(0, 100),
                     price: precio,
                     original_price: (orig > precio && orig < precio * 8) ? orig : 0,
                     permalink: link, thumbnail: img,
-                    available_quantity: stk,
+                    available_quantity: parseStock(card),
                     tiene_cupon: cupon, cupon_monto: cmonto,
-                    precio_con_cupon: cmonto > 0 ? precio - cmonto : precio
+                    precio_con_cupon: cmonto > 0 ? precio - cmonto : precio,
+                    es_flash: detectFlash(card),
+                    envio_gratis: detectEnvioGratis(card),
                 });
             }
         } catch(e) {}
@@ -257,7 +321,10 @@ def scrape_pagina(page, pagina):
         page.goto(pagina["url"], wait_until="domcontentloaded", timeout=30000)
         time.sleep(random.uniform(4, 7))
         items = page.evaluate(JS_EXTRACT)
-        logger.info("[PW] " + pagina["nombre"] + ": " + str(len(items or [])) + " productos")
+        if pagina.get("es_flash"):
+            for item in (items or []):
+                item["es_flash"] = True
+        logger.info("[PW] " + pagina["nombre"] + ": " + str(len(items or [])))
         return items or []
     except Exception as e:
         logger.error("[PW] " + str(e))
@@ -285,7 +352,6 @@ def enviar(chat_id, texto, modo="Markdown"):
 
 
 def enviar_foto(chat_id, foto_url, caption, modo="Markdown"):
-    """Envía imagen con caption. Fallback a texto si la foto falla."""
     cap = caption[:1024]
     try:
         r = requests.post(TELEGRAM_API + "/sendPhoto", json={
@@ -295,16 +361,11 @@ def enviar_foto(chat_id, foto_url, caption, modo="Markdown"):
         d = r.json()
         if d.get("ok"):
             return d["result"]["message_id"]
-        logger.warning("[TG foto] " + str(d.get("description", "")) + " — fallback texto")
         return enviar(chat_id, caption, modo)
     except Exception as e:
         logger.error("[TG foto] " + str(e))
         return enviar(chat_id, caption, modo)
 
-
-# ─────────────────────────────────────────────
-# AFILIADOS
-# ─────────────────────────────────────────────
 
 def link_ml(url, item_id):
     base = url.split("?")[0].split("#")[0]
@@ -315,24 +376,26 @@ def link_ml(url, item_id):
 # SCORE
 # ─────────────────────────────────────────────
 
-def score(descuento, stock, precio, cupon):
+def score(descuento, stock, precio, cupon, envio_gratis=False, es_flash=False):
     s = 0.0
     if descuento >= 0.60:   s += 4.0
     elif descuento >= 0.40: s += 3.5
     elif descuento >= 0.25: s += 3.0
     elif descuento >= 0.15: s += 2.0
-    elif descuento >= 0.05: s += 1.0
-    else:                   s += 0.2
+    else:                   s += 0.5
 
-    real_stock = stock if stock is not None else 10
-    if real_stock == 1:    s += 2.0
-    elif real_stock <= 3:  s += 1.8
-    elif real_stock <= 10: s += 1.0
+    stk = stock if stock is not None else 10
+    if stk == 1:    s += 2.0
+    elif stk <= 3:  s += 1.8
+    elif stk <= 10: s += 1.0
 
     if precio >= 8000:   s += 1.5
     elif precio >= 3000: s += 1.0
 
-    if cupon: s += 1.0
+    if cupon:        s += 1.0
+    if envio_gratis: s += 0.5
+    if es_flash:     s += 1.0
+
     return min(10, round(s))
 
 
@@ -340,43 +403,37 @@ def score(descuento, stock, precio, cupon):
 # HASHTAGS
 # ─────────────────────────────────────────────
 
-def generar_hashtags(nombre: str, descuento: float, sc: int, cupon: bool = False) -> str:
+def generar_hashtags(nombre, descuento, sc, cupon=False, es_flash=False):
     n    = nombre.lower()
     tags = []
 
-    # Categoría
     if any(w in n for w in ["iphone", "galaxy", "celular", "smartphone", "redmi", "poco"]):
         tags.append("#celulares")
-    elif any(w in n for w in ["laptop", "notebook", "macbook", "thinkpad", "ideapad", "inspiron"]):
+    elif any(w in n for w in ["laptop", "notebook", "macbook", "thinkpad", "ideapad"]):
         tags.append("#laptops")
-    elif any(w in n for w in ["televisor", " tv ", "smart tv", "oled", "qled", "pantalla"]):
+    elif any(w in n for w in ["televisor", " tv ", "smart tv", "oled", "qled"]):
         tags.append("#televisores")
-    elif any(w in n for w in ["audifonos", "airpods", "bocina", "speaker", "wh-", "wf-"]):
+    elif any(w in n for w in ["audifonos", "airpods", "bocina", "wh-", "wf-"]):
         tags.append("#audio")
-    elif any(w in n for w in ["playstation", "xbox", "nintendo", "switch", "ps5", "ps4"]):
+    elif any(w in n for w in ["playstation", "xbox", "nintendo", "switch", "ps5"]):
         tags.append("#gaming")
     elif any(w in n for w in ["tablet", "ipad"]):
         tags.append("#tablets")
-    elif any(w in n for w in ["smartwatch", "watch", "band", "reloj inteligente"]):
+    elif any(w in n for w in ["smartwatch", "watch", "band"]):
         tags.append("#wearables")
-    elif any(w in n for w in ["camara", "gopro", "lente", "dji"]):
-        tags.append("#fotografia")
-    elif any(w in n for w in ["impresora", "tinta", "toner"]):
-        tags.append("#impresoras")
     else:
         tags.append("#electronica")
 
-    # Marca
     marcas = {
-        "apple":    ["iphone", "ipad", "macbook", "airpods", " apple "],
+        "apple":    ["iphone", "ipad", "macbook", "airpods"],
         "samsung":  ["samsung"],
         "sony":     ["sony"],
-        "lenovo":   ["lenovo", "thinkpad", "ideapad"],
-        "dell":     ["dell", "inspiron", "xps"],
-        "hp":       [" hp ", "hewlett"],
-        "asus":     ["asus", "rog ", "zenbook"],
+        "lenovo":   ["lenovo", "thinkpad"],
+        "dell":     ["dell", "inspiron"],
+        "hp":       [" hp "],
+        "asus":     ["asus"],
         "xiaomi":   ["xiaomi", "redmi", "poco"],
-        "motorola": ["motorola", "moto g", "moto e"],
+        "motorola": ["motorola", "moto "],
         "lg":       [" lg "],
     }
     for marca, kws in marcas.items():
@@ -384,13 +441,10 @@ def generar_hashtags(nombre: str, descuento: float, sc: int, cupon: bool = False
             tags.append(f"#{marca}")
             break
 
-    # Tipo de oferta
-    if sc >= 8 or descuento >= 0.50:
-        tags.append("#errorprecio")
-    elif descuento >= DESCUENTO_HOT:
-        tags.append("#hotdeal")
-    if cupon:
-        tags.append("#cupon")
+    if sc >= 8 or descuento >= 0.50: tags.append("#errorprecio")
+    elif descuento >= DESCUENTO_HOT:  tags.append("#hotdeal")
+    if es_flash:                      tags.append("#solohoy")
+    if cupon:                         tags.append("#cupon")
 
     return " ".join(tags)
 
@@ -400,35 +454,32 @@ def generar_hashtags(nombre: str, descuento: float, sc: int, cupon: bool = False
 # ─────────────────────────────────────────────
 
 def _stock_texto(stk, bold=True):
-    """
-    Convierte el valor de stock en texto para mostrar.
-    stk=None o stk>=10 significa que ML no reportó stock real → no mostrar número.
-    """
     if stk is None or stk >= 10:
         return ""
-    if stk == 1:
-        return "*ÚLTIMA UNIDAD*" if bold else "ÚLTIMA UNIDAD"
-    if stk <= 3:
-        return f"*Solo {stk} unidades*" if bold else f"Solo {stk} unidades"
+    if stk == 1:   return "*ÚLTIMA UNIDAD*" if bold else "ÚLTIMA UNIDAD"
+    if stk <= 3:   return f"*Solo {stk} unidades*" if bold else f"Solo {stk} unidades"
     return f"{stk} unidades"
 
 
 def msg_vip(item, stats):
-    """Mensaje VIP completo — texto sin hora."""
-    nombre  = item["nombre"][:65]
-    precio  = item["precio"]
-    p_orig  = item["precio_orig"]
-    desc    = item["descuento"] * 100
-    stk     = item["stock"]
-    lnk     = link_ml(item["url"], item["id"])
-    sc      = item["score"]
-    cupon   = item.get("tiene_cupon", False)
-    c_monto = item.get("cupon_monto", 0)
-    p_cupon = item.get("precio_con_cupon", precio)
+    nombre     = item["nombre"][:65]
+    precio     = item["precio"]
+    p_orig     = item["precio_orig"]
+    desc       = item["descuento"] * 100
+    stk        = item["stock"]
+    lnk        = link_ml(item["url"], item["id"])
+    sc         = item["score"]
+    cupon      = item.get("tiene_cupon", False)
+    c_monto    = item.get("cupon_monto", 0)
+    p_cupon    = item.get("precio_con_cupon", precio)
+    es_flash   = item.get("es_flash", False)
+    env_gratis = item.get("envio_gratis", False)
     rl = p_orig * 0.80
     rh = p_orig * 0.92
 
-    if sc >= 8 or item["descuento"] >= 0.50:
+    if es_flash:
+        icono = "⏰"; tag = "SOLO HOY — VIP PRIMERO"
+    elif sc >= 8 or item["descuento"] >= 0.50:
         icono = "🚨"; tag = "ERROR DE PRECIO — SOLO VIP"
     elif item["descuento"] >= DESCUENTO_HOT:
         icono = "🔥"; tag = "HOT DEAL — EXCLUSIVO VIP"
@@ -445,6 +496,8 @@ def msg_vip(item, stats):
     if p_orig > precio:
         m += f"Precio original: ${p_orig:,.0f} MXN\n"
     m += f"Descuento: *-{desc:.0f}%*\n"
+    if env_gratis:
+        m += "✅ *Envío gratis*\n"
     if cupon and c_monto > 0:
         m += f"\n🎟️ *Con cupón: ${p_cupon:,.0f} MXN* (−${c_monto:,.0f} adicional)\n"
     if stats.get("es_minimo") and stats.get("dias", 0) >= 7:
@@ -454,35 +507,37 @@ def msg_vip(item, stats):
     if stxt:
         m += f"\n{stxt}\n"
     if desc >= 30 or (stk is not None and stk <= 3):
-        m += f"_Oferta podría terminar pronto_\n"
+        m += "_Oferta podría terminar pronto_\n"
     m += f"\nScore: {sc}/10\n\n"
     m += f"[COMPRAR AHORA]({lnk})\n\n"
     if p_orig > precio:
-        m += f"_Reventa estimada: ${rl:,.0f} - ${rh:,.0f} MXN_\n"
+        m += f"_Reventa estimada: ${rl:,.0f} - ${rh:,.0f} MXN_"
 
-    # Hashtags al final para búsqueda en el canal
-    hashtags = generar_hashtags(nombre, item["descuento"], sc, cupon)
+    hashtags = generar_hashtags(nombre, item["descuento"], sc, cupon, es_flash)
     if hashtags:
-        m += f"\n{hashtags}"
+        m += f"\n\n{hashtags}"
     return m
 
 
 def msg_vip_caption(item, stats):
-    """Versión compacta para caption de foto (max 1024 chars)."""
-    nombre  = item["nombre"][:55]
-    precio  = item["precio"]
-    p_orig  = item["precio_orig"]
-    desc    = item["descuento"] * 100
-    stk     = item["stock"]
-    lnk     = link_ml(item["url"], item["id"])
-    sc      = item["score"]
-    cupon   = item.get("tiene_cupon", False)
-    c_monto = item.get("cupon_monto", 0)
-    p_cupon = item.get("precio_con_cupon", precio)
+    nombre     = item["nombre"][:55]
+    precio     = item["precio"]
+    p_orig     = item["precio_orig"]
+    desc       = item["descuento"] * 100
+    stk        = item["stock"]
+    lnk        = link_ml(item["url"], item["id"])
+    sc         = item["score"]
+    cupon      = item.get("tiene_cupon", False)
+    c_monto    = item.get("cupon_monto", 0)
+    p_cupon    = item.get("precio_con_cupon", precio)
+    es_flash   = item.get("es_flash", False)
+    env_gratis = item.get("envio_gratis", False)
     rl = p_orig * 0.80
     rh = p_orig * 0.92
 
-    if sc >= 8 or item["descuento"] >= 0.50:
+    if es_flash:
+        icono = "⏰"; tag = "SOLO HOY — VIP PRIMERO"
+    elif sc >= 8 or item["descuento"] >= 0.50:
         icono = "🚨"; tag = "ERROR DE PRECIO — SOLO VIP"
     elif item["descuento"] >= DESCUENTO_HOT:
         icono = "🔥"; tag = "HOT DEAL — EXCLUSIVO VIP"
@@ -498,6 +553,8 @@ def msg_vip_caption(item, stats):
     m += f"*${precio:,.0f} MXN* (−{desc:.0f}%)\n"
     if p_orig > precio:
         m += f"Normal: ${p_orig:,.0f}\n"
+    if env_gratis:
+        m += "✅ Envío gratis\n"
     if cupon and c_monto > 0:
         m += f"🎟️ Con cupón: *${p_cupon:,.0f}*\n"
     if stats.get("es_minimo") and stats.get("dias", 0) >= 7:
@@ -508,29 +565,26 @@ def msg_vip_caption(item, stats):
         m += "_Podría terminar pronto_\n"
     m += f"\nScore: {sc}/10"
     if p_orig > precio:
-        m += f"\n_Reventa est: ${rl:,.0f}–${rh:,.0f}_"
+        m += f"\n_Reventa: ${rl:,.0f}–${rh:,.0f}_"
     m += f"\n\n[COMPRAR AHORA]({lnk})\n"
-    hashtags = generar_hashtags(nombre, item["descuento"], sc, cupon)
+    hashtags = generar_hashtags(nombre, item["descuento"], sc, cupon, es_flash)
     if hashtags:
         m += f"\n{hashtags}"
     return m[:1024]
 
 
 def msg_free(item, n_exclusivos_vip=0):
-    """
-    Mensaje para el canal free con FOMO integrado.
-    n_exclusivos_vip: cuántas alertas VIP adicionales no llegan aquí.
-    """
-    nombre  = item["nombre"][:55]
-    precio  = item["precio"]
-    p_orig  = item["precio_orig"]
-    desc    = item["descuento"] * 100
-    stk     = item["stock"]
-    lnk     = link_ml(item["url"], item["id"])
-    sc      = item["score"]
-    cupon   = item.get("tiene_cupon", False)
-    c_monto = item.get("cupon_monto", 0)
-    p_cupon = item.get("precio_con_cupon", precio)
+    nombre     = item["nombre"][:55]
+    precio     = item["precio"]
+    p_orig     = item["precio_orig"]
+    desc       = item["descuento"] * 100
+    stk        = item["stock"]
+    lnk        = link_ml(item["url"], item["id"])
+    sc         = item["score"]
+    cupon      = item.get("tiene_cupon", False)
+    c_monto    = item.get("cupon_monto", 0)
+    p_cupon    = item.get("precio_con_cupon", precio)
+    env_gratis = item.get("envio_gratis", False)
 
     if sc >= 7:   icono = "🚨"
     elif sc >= 5: icono = "🔥"
@@ -541,11 +595,13 @@ def msg_free(item, n_exclusivos_vip=0):
 
     m  = f"{icono} <b>{nombre}</b>\n\n"
     m += f"<b>${precio:,.0f} MXN</b>"
-    if desc >= 5:
+    if desc >= 15:
         m += f" <i>(-{desc:.0f}%)</i>"
     m += "\n"
     if p_orig > precio:
         m += f"<s>${p_orig:,.0f}</s>\n"
+    if env_gratis:
+        m += "✅ Envío gratis\n"
     if cupon and c_monto > 0:
         m += f"🎟️ Con cupón: <b>${p_cupon:,.0f} MXN</b>\n"
     if stxt:
@@ -553,10 +609,11 @@ def msg_free(item, n_exclusivos_vip=0):
 
     m += f"\n<a href=\"{lnk}\">Ver oferta en Mercado Libre</a>\n\n"
 
-    # FOMO — siempre presente, varía según contexto
-    m += "<i>Esta alerta llegó al Canal VIP hace 3 minutos con análisis de reventa completo.</i>\n"
+    m += "<i>Esta alerta llegó al Canal VIP primero con análisis de reventa completo.</i>\n"
     if n_exclusivos_vip > 0:
-        m += f"<i>Además hubo {n_exclusivos_vip} oportunidad{'es' if n_exclusivos_vip > 1 else ''} exclusiva{'s' if n_exclusivos_vip > 1 else ''} que no llegan aquí.</i>\n"
+        m += (f"<i>Además hubo {n_exclusivos_vip} "
+              f"oportunidad{'es' if n_exclusivos_vip > 1 else ''} "
+              f"exclusiva{'s' if n_exclusivos_vip > 1 else ''} que no llegan aquí.</i>\n")
     if stk is not None and stk <= 5:
         m += "<i>Varios miembros VIP ya la vieron. Quedan pocas unidades.</i>\n"
     else:
@@ -571,21 +628,22 @@ def msg_free(item, n_exclusivos_vip=0):
 # PROCESAMIENTO
 # ─────────────────────────────────────────────
 
-def procesar(prod_raw):
+def procesar(prod_raw, pagina_es_flash=False):
     try:
-        item_id = str(prod_raw.get("id", ""))
-        nombre  = str(prod_raw.get("title", ""))[:80]
-        precio  = float(prod_raw.get("price", 0))
-        p_orig  = prod_raw.get("original_price")
-        p_orig  = float(p_orig) if p_orig else 0
-        link    = str(prod_raw.get("permalink", ""))
-        # stock: None si no se detectó en página (no mostrar número)
-        stk_raw = prod_raw.get("available_quantity")
-        stk     = int(stk_raw) if stk_raw is not None else None
-        thumb   = str(prod_raw.get("thumbnail", ""))
-        cupon   = bool(prod_raw.get("tiene_cupon", False))
-        c_monto = float(prod_raw.get("cupon_monto", 0))
-        p_cupon = float(prod_raw.get("precio_con_cupon", precio))
+        item_id    = str(prod_raw.get("id", ""))
+        nombre     = str(prod_raw.get("title", ""))[:80]
+        precio     = float(prod_raw.get("price", 0))
+        p_orig     = prod_raw.get("original_price")
+        p_orig     = float(p_orig) if p_orig else 0
+        link       = str(prod_raw.get("permalink", ""))
+        stk_raw    = prod_raw.get("available_quantity")
+        stk        = int(stk_raw) if stk_raw is not None else None
+        thumb      = str(prod_raw.get("thumbnail", ""))
+        cupon      = bool(prod_raw.get("tiene_cupon", False))
+        c_monto    = float(prod_raw.get("cupon_monto", 0))
+        p_cupon    = float(prod_raw.get("precio_con_cupon", precio))
+        es_flash   = bool(prod_raw.get("es_flash", False)) or pagina_es_flash
+        env_gratis = bool(prod_raw.get("envio_gratis", False))
 
         if not nombre or precio <= 0 or not link:
             return None
@@ -598,12 +656,19 @@ def procesar(prod_raw):
         if cupon and c_monto > 0:
             descuento = max(descuento, c_monto / precio)
 
+        # FILTRO PRINCIPAL: mínimo 15% de descuento real
+        # Remates tienen mínimo 5% porque a veces el precio original no aparece
+        es_remate = "remate" in link.lower()
+        min_desc  = 0.05 if es_remate else 0.15
+        if descuento < min_desc:
+            return None
+
         pid = upsert_prod(link, nombre, "ML Ofertas", item_id)
         guardar_precio(pid, precio, p_orig or precio, stk or 0)
         if alerta_hoy(pid):
             return None
 
-        sc    = score(descuento, stk, precio, cupon)
+        sc    = score(descuento, stk, precio, cupon, env_gratis, es_flash)
         stats = get_stats(pid, precio)
         thumb_hd = thumb.replace("I.jpg", "O.jpg") if thumb else ""
 
@@ -615,6 +680,8 @@ def procesar(prod_raw):
             "score": sc, "stats": stats,
             "tiene_cupon": cupon, "cupon_monto": c_monto,
             "precio_con_cupon": p_cupon,
+            "es_flash": es_flash,
+            "envio_gratis": env_gratis,
         }
     except Exception:
         return None
@@ -625,9 +692,9 @@ def procesar(prod_raw):
 # ─────────────────────────────────────────────
 
 def main():
-    hora_mx = datetime.now(TZ_MEXICO)
-    hora    = hora_mx.hour
-    logger.info("[GITHUB v7] " + hora_mx.strftime("%d/%m %H:%M") + " MX")
+    hora_mx_dt = datetime.now(TZ_MEXICO)
+    hora       = hora_mx_dt.hour
+    logger.info("[GITHUB v8] " + hora_mx_dt.strftime("%d/%m %H:%M") + " MX")
 
     es_horario_free = HORA_FREE_INICIO <= hora < HORA_FREE_FIN
     es_madrugada    = hora < 7
@@ -647,20 +714,27 @@ def main():
         page = context.new_page()
         for pagina in PAGINAS:
             for prod_raw in scrape_pagina(page, pagina):
-                item = procesar(prod_raw)
+                item = procesar(prod_raw, pagina_es_flash=pagina.get("es_flash", False))
                 if item:
                     todos.append(item)
             time.sleep(random.uniform(2, 4))
         browser.close()
 
-    seen   = set()
-    unicos = []
+    # Dedup global — si mismo producto en varias páginas, mayor score gana
+    seen = {}
     for a in todos:
-        if a and a["id"] not in seen:
-            seen.add(a["id"])
-            unicos.append(a)
-    unicos.sort(key=lambda x: x["score"], reverse=True)
-    logger.info("[GITHUB] Productos unicos: " + str(len(unicos)))
+        if a:
+            ex = seen.get(a["id"])
+            if ex is None or a["score"] > ex["score"]:
+                seen[a["id"]] = a
+
+    unicos = list(seen.values())
+    unicos.sort(
+        key=lambda x: (x.get("es_flash", False), x["score"]),
+        reverse=True
+    )
+    logger.info(f"[GITHUB] Unicos con >=15% desc: {len(unicos)} "
+                f"(flash: {sum(1 for x in unicos if x.get('es_flash'))})")
 
     vip_n  = 0
     free_n = 0
@@ -669,7 +743,7 @@ def main():
     for item in unicos:
         if vip_n >= MAX_VIP:
             break
-        if es_madrugada and item["descuento"] < DESCUENTO_HOT:
+        if es_madrugada and not item.get("es_flash") and item["descuento"] < DESCUENTO_HOT:
             continue
 
         thumb   = item.get("thumbnail", "")
@@ -688,16 +762,17 @@ def main():
             if item["score"] >= 8 and MAKE_WEBHOOK_URL:
                 try:
                     requests.post(MAKE_WEBHOOK_URL, json={
-                        "nombre":    item["nombre"][:80],
-                        "precio":    str(round(item["precio"])),
-                        "descuento": str(round(item["descuento"] * 100)),
-                        "thumbnail": item.get("thumbnail", ""),
-                        "link":      item["url"],
-                        "score":     item["score"],
+                        "nombre":      item["nombre"][:80],
+                        "precio":      str(round(item["precio"])),
+                        "descuento":   str(round(item["descuento"] * 100)),
+                        "thumbnail":   item.get("thumbnail", ""),
+                        "link":        item["url"],
+                        "score":       item["score"],
+                        "es_flash":    item.get("es_flash", False),
+                        "envio_gratis": item.get("envio_gratis", False),
                     }, timeout=10)
                 except Exception:
                     pass
-
         time.sleep(5)
 
     # ── Esperar ventaja VIP ──
@@ -707,11 +782,10 @@ def main():
 
     # ── Free con FOMO ──
     if es_horario_free:
-        # Seleccionar: 1 de score más alto + hasta 3 más con score >= 2
         candidatos_top = [x for x in unicos if x["score"] >= 4][:1]
-        candidatos_mas = [x for x in unicos if x["score"] >= 2 and x not in candidatos_top][:3]
-        candidatos     = candidatos_top + candidatos_mas
-
+        candidatos_mas = [x for x in unicos
+                          if x["score"] >= 2 and x not in candidatos_top][:3]
+        candidatos = candidatos_top + candidatos_mas
         if not candidatos and unicos:
             candidatos = unicos[:MAX_FREE]
 
@@ -724,25 +798,24 @@ def main():
                 guardar_alerta(item.get("pid"), item["score"], "free",
                                item["precio"], item["descuento"])
                 free_n += 1
-                n_exclusivos = 0  # Solo mencionar en el primero
+                n_exclusivos = 0
             time.sleep(6)
 
-    # ── Resumen si no hubo alertas ──
+    # ── Resumen si sin alertas en hora pico ──
     if free_n == 0 and hora in (12, 19) and unicos:
         top    = unicos[:5]
         titulo = "Mejores precios de la tarde" if hora >= 15 else "Mejores precios de la mañana"
         msg    = f"📋 <b>{titulo} — DropNode MX</b>\n\n"
         msg   += "<i>Nuestro equipo revisó miles de productos. Estos destacan:</i>\n\n"
         for i, it in enumerate(top, 1):
-            lnk = link_ml(it["url"], it["id"])
-            d   = it["descuento"] * 100
-            ln  = f"{i}. 🔥 <b>{it['nombre'][:50]}</b>\n"
-            ln += f"   <b>${it['precio']:,.0f} MXN</b>"
-            if d >= 5:
-                ln += f" (-{d:.0f}%)"
-            if it.get("tiene_cupon"):
-                ln += " 🎟️"
-            ln += f" <a href=\"{lnk}\">Ver oferta</a>"
+            lnk  = link_ml(it["url"], it["id"])
+            d    = it["descuento"] * 100
+            ftag = " ⏰" if it.get("es_flash") else ""
+            ln   = f"{i}. 🔥 <b>{it['nombre'][:45]}{ftag}</b>\n"
+            ln  += f"   <b>${it['precio']:,.0f} MXN</b> (-{d:.0f}%)"
+            if it.get("envio_gratis"):
+                ln += " ✅"
+            ln  += f" <a href=\"{lnk}\">Ver</a>"
             msg += ln + "\n\n"
         if LAUNCHPASS_LINK:
             msg += "<i>Los VIP los vieron primero con análisis completo.</i>\n"
@@ -750,15 +823,13 @@ def main():
         enviar(CHANNEL_FREE_ID, msg, "HTML")
         free_n += 1
 
-    # ── Buenos días VIP ──
     if hora == 7 and vip_n == 0:
         enviar(CHANNEL_VIP_ID,
                "🌅 *Buenos días — DropNode VIP*\n\n"
-               "Ya estamos monitoreando. Las alertas de hoy llegan "
-               "en cuanto encontremos algo que valga tu atención.\n\n"
+               "Ya estamos monitoreando Solo Hoy, Remates y todas las secciones.\n"
                "_Solo publicamos cuando hay algo real._")
 
-    logger.info(f"[GITHUB v7] Fin — VIP:{vip_n} Free:{free_n}")
+    logger.info(f"[GITHUB v8] Fin — VIP:{vip_n} Free:{free_n}")
 
 
 if __name__ == "__main__":
