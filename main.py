@@ -1,8 +1,10 @@
 # =============================================================
-# DROPNODE MX — main.py v3.1
+# DROPNODE MX — main.py v3.2
 # GitHub Actions cada 15 minutos
-# 15 scrapers en rotación inteligente
-# + Sistema de temporadas integrado
+# 18 scrapers: Playwright (ML) + API JSON + requests
+# ─────────────────────────────────────────────
+# FIX: GROUP_ID puede estar vacío — protegido
+# FIX: imports con try/except para no crashear si falta módulo
 # =============================================================
 
 import logging
@@ -12,47 +14,60 @@ import os
 import random
 from datetime import datetime, timezone, timedelta
 
-from scraper_walmart   import ejecutar_ciclo_walmart   as ciclo_walmart
-from scraper_liverpool import ejecutar_ciclo_liverpool as ciclo_liverpool
-from scraper_coppel    import ejecutar_ciclo_coppel    as ciclo_coppel
-from scraper_amazon    import ejecutar_ciclo_amazon    as ciclo_amazon
-from scraper_otros import (
-    ejecutar_ciclo_aliexpress      as ciclo_aliexpress,
-    ejecutar_ciclo_shein           as ciclo_shein,
-    ejecutar_ciclo_marcas          as ciclo_marcas,
-    ejecutar_ciclo_tiktok_trending as ciclo_tiktok,
-)
-from scraper_tiendas import (
-    ejecutar_ciclo_costco    as ciclo_costco,
-    ejecutar_ciclo_sams      as ciclo_sams,
-    ejecutar_ciclo_petco     as ciclo_petco,
-    ejecutar_ciclo_sears     as ciclo_sears,
-    ejecutar_ciclo_palacio   as ciclo_palacio,
-    ejecutar_ciclo_inditex   as ciclo_inditex,
-    ejecutar_ciclo_marcas_directo as ciclo_marcas_directo,
-)
+# ── Imports con fallback — nunca crashear por import ──
+def _import(module, func):
+    try:
+        mod = __import__(module, fromlist=[func])
+        return getattr(mod, func)
+    except Exception as e:
+        logging.warning(f"[IMPORT] {module}.{func}: {e}")
+        return lambda *a, **k: []
+
+ciclo_walmart        = _import("scraper_walmart",   "ejecutar_ciclo_walmart")
+ciclo_liverpool      = _import("scraper_liverpool", "ejecutar_ciclo_liverpool")
+ciclo_coppel         = _import("scraper_coppel",    "ejecutar_ciclo_coppel")
+ciclo_amazon         = _import("scraper_amazon",    "ejecutar_ciclo_amazon")
+ciclo_aliexpress     = _import("scraper_otros",     "ejecutar_ciclo_aliexpress")
+ciclo_shein          = _import("scraper_otros",     "ejecutar_ciclo_shein")
+ciclo_marcas         = _import("scraper_otros",     "ejecutar_ciclo_marcas")
+ciclo_tiktok         = _import("scraper_otros",     "ejecutar_ciclo_tiktok_trending")
+ciclo_costco         = _import("scraper_tiendas",   "ejecutar_ciclo_costco")
+ciclo_sams           = _import("scraper_tiendas",   "ejecutar_ciclo_sams")
+ciclo_petco          = _import("scraper_tiendas",   "ejecutar_ciclo_petco")
+ciclo_sears          = _import("scraper_tiendas",   "ejecutar_ciclo_sears")
+ciclo_palacio        = _import("scraper_tiendas",   "ejecutar_ciclo_palacio")
+ciclo_inditex        = _import("scraper_tiendas",   "ejecutar_ciclo_inditex")
+ciclo_marcas_directo = _import("scraper_tiendas",   "ejecutar_ciclo_marcas_directo")
+ciclo_palacio_api    = _import("scraper_api",       "ejecutar_ciclo_palacio_api")
+ciclo_petco_api      = _import("scraper_api",       "ejecutar_ciclo_petco_api")
+ciclo_ml_deals       = _import("scraper_api",       "ejecutar_ciclo_ml_deals")
+ciclo_sams_api       = _import("scraper_api",       "ejecutar_ciclo_sams_api")
+
 from telegram_bot import (
-    enviar_resumen_diario,
-    enviar_mensaje_financiero,
-    enviar_recordatorio_vip,
-    enviar_y_fijar_bienvenida_grupo,
-    enviar_mensaje,
-    setup_canal_free,
-    canal_free_tiene_fijado,
+    enviar_resumen_diario, enviar_mensaje_financiero,
+    enviar_recordatorio_vip, enviar_y_fijar_bienvenida_grupo,
+    enviar_mensaje, setup_canal_free, canal_free_tiene_fijado,
 )
-from community_manager  import ejecutar_community_manager
-from heat_score         import calcular_heat_score
-from peticiones         import verificar_match
-from temporadas         import (
-    temporada_activa,
-    score_bonus_temporada,
-    ejecutar_alertas_temporada,
-)
+from community_manager import ejecutar_community_manager, fomo_vip_al_free
+from heat_score        import calcular_heat_score
 from config import (
     TELEGRAM_TOKEN, GROUP_ID, CHANNEL_FREE_ID, CHANNEL_VIP_ID,
-    LAUNCHPASS_LINK, TIMEZONE_OFFSET_HOURS,
-    SUPABASE_URL, SUPABASE_KEY,
+    LAUNCHPASS_LINK, TIMEZONE_OFFSET_HOURS, SUPABASE_URL, SUPABASE_KEY,
 )
+
+try:
+    from peticiones     import verificar_match
+except Exception:
+    verificar_match = lambda *a, **k: False
+
+try:
+    from temporadas import (
+        temporada_activa, score_bonus_temporada, ejecutar_alertas_temporada
+    )
+except Exception:
+    temporada_activa       = lambda: (None, None)
+    score_bonus_temporada  = lambda *a, **k: 0.0
+    ejecutar_alertas_temporada = lambda: None
 
 logging.basicConfig(
     level=logging.INFO,
@@ -61,7 +76,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-TZ_MEXICO = timezone(timedelta(hours=TIMEZONE_OFFSET_HOURS))
+TZ_MEXICO = timezone(timedelta(hours=int(TIMEZONE_OFFSET_HOURS)))
 
 
 def hora_mx():
@@ -73,7 +88,7 @@ def dentro_de_horario():
 
 
 # ─────────────────────────────────────────────
-# COLA FOMO en Supabase
+# COLA FOMO — Supabase
 # ─────────────────────────────────────────────
 
 _db_client = None
@@ -96,8 +111,8 @@ def cola_agregar(item: dict, score: float, n_vip: int, delay_min: int = 30):
     if not db:
         return
     try:
-        from datetime import timedelta
-        send_after = (datetime.utcnow() + timedelta(minutes=delay_min)).isoformat()
+        from datetime import timedelta as td
+        send_after = (datetime.utcnow() + td(minutes=delay_min)).isoformat()
         item_s = {k: v for k, v in item.items()
                   if isinstance(v, (str, int, float, bool, type(None)))}
         db.table("cola_free").insert({
@@ -105,7 +120,7 @@ def cola_agregar(item: dict, score: float, n_vip: int, delay_min: int = 30):
             "send_after": send_after, "enviado": False,
         }).execute()
     except Exception as e:
-        logger.warning(f"[COLA] agregar: {e}")
+        logger.warning(f"[COLA] {e}")
 
 
 def cola_listos() -> list:
@@ -122,7 +137,7 @@ def cola_listos() -> list:
         return []
 
 
-def cola_marcar_enviados(ids: list):
+def cola_marcar(ids: list):
     db = get_db()
     if not db or not ids:
         return
@@ -132,13 +147,13 @@ def cola_marcar_enviados(ids: list):
         pass
 
 
-def cola_limpiar_viejos():
+def cola_limpiar():
     db = get_db()
     if not db:
         return
     try:
-        from datetime import timedelta
-        limite = (datetime.utcnow() - timedelta(hours=3)).isoformat()
+        from datetime import timedelta as td
+        limite = (datetime.utcnow() - td(hours=3)).isoformat()
         db.table("cola_free").delete().eq(
             "enviado", False).lt("send_after", limite).execute()
     except Exception:
@@ -146,90 +161,79 @@ def cola_limpiar_viejos():
 
 
 # ─────────────────────────────────────────────
-# FORMATO MENSAJES EXTERNOS
+# FORMATO MENSAJES
 # ─────────────────────────────────────────────
 
 EMOJIS = {
-    "walmart":      "🛒", "liverpool": "🏬", "coppel":    "🏪",
-    "amazon":       "📦", "aliexpress":"🌐", "shein":     "👗",
-    "costco":       "🏪", "sams":      "🏬", "petco":     "🐾",
-    "sears":        "🏬", "palacio":   "💎", "zara":      "👗",
-    "pullbear":     "👕", "bershka":   "👕", "lefties":   "👕",
-    "samsung":      "📱", "lg":        "📺", "sony":      "🎮",
-    "marcas":       "🔌", "tiktok_trend":"🎵",
+    "walmart": "🛒", "liverpool": "🏬", "coppel": "🏪",
+    "amazon": "📦", "aliexpress": "🌐", "shein": "👗",
+    "costco": "🏪", "sams": "🏬", "petco": "🐾",
+    "sears": "🏬", "palacio": "💎", "zara": "👗",
+    "pullbear": "👕", "bershka": "👕", "lefties": "👕",
+    "samsung": "📱", "lg": "📺", "sony": "🎮",
+    "mercadolibre": "🛒", "tiktok_trend": "🎵",
 }
 
 NOMBRE_DISPLAY = {
-    "sams":    "Sam's Club",
-    "palacio": "Palacio de Hierro",
-    "pullbear":"Pull&Bear",
-    "marcas":  "Tiendas de Marca",
+    "sams": "Sam's Club", "palacio": "Palacio de Hierro",
+    "pullbear": "Pull&Bear", "mercadolibre": "Mercado Libre",
     "tiktok_trend": "Trending",
 }
 
 
-def _nombre_tienda(tienda: str) -> str:
-    return NOMBRE_DISPLAY.get(tienda, tienda.upper() if tienda in (
-        "costco","samsung","lg","sony","zara","bershka","lefties","sears"
-    ) else tienda.capitalize())
+def _td(t: str) -> str:
+    return NOMBRE_DISPLAY.get(t, t.upper() if t in (
+        "costco", "samsung", "lg", "sony", "zara", "bershka",
+        "lefties", "sears", "amazon"
+    ) else t.capitalize())
 
 
-def formatear_vip_externa(item: dict) -> str:
-    tienda   = item["tienda"]
-    nombre   = item["nombre"][:60]
-    precio   = item["precio_actual"]
-    precio_o = item["precio_original"]
-    desc     = item["descuento"] * 100
-    url      = item["url"]
-    et       = EMOJIS.get(tienda, "🛍️")
-    ec       = item["categoria"]["emoji"]
-    td       = _nombre_tienda(tienda)
-    rl = precio_o * 0.78
-    rh = precio_o * 0.90
+def fmt_vip(item: dict) -> str:
+    t  = item["tienda"]
+    n  = item["nombre"][:60]
+    p  = item["precio_actual"]
+    po = item["precio_original"]
+    d  = item["descuento"] * 100
+    u  = item["url"]
+    et = EMOJIS.get(t, "🛍")
+    ec = item["categoria"]["emoji"]
+    td = _td(t)
+    rl = po * 0.78; rh = po * 0.90
     ev = "✅ Envío gratis\n" if item.get("envio_gratis") else ""
-
-    # Temporada activa
-    key_t, t_info = temporada_activa()
-    tag_temp = f" [{t_info['emoji']} {t_info['nombre']}]" if t_info else ""
-
+    fl = " ⏰ SOLO HOY" if item.get("es_flash") else ""
+    _, tinfo = temporada_activa()
+    tag_t = f" [{tinfo['emoji']} {tinfo['nombre']}]" if tinfo else ""
     return (
-        f"{et} *{td} — OFERTA EXCLUSIVA{tag_temp}* {ec}\n\n"
-        f"*{nombre}*\n\n"
-        f"*${precio:,.0f} MXN* (-{desc:.0f}%)\n"
-        f"Normal: ${precio_o:,.0f} MXN\n"
-        f"{ev}\n"
-        f"[COMPRAR AHORA]({url})\n\n"
-        f"_Reventa estimada: ${rl:,.0f} - ${rh:,.0f} MXN_"
+        f"{et} *{td} — EXCLUSIVO VIP{fl}{tag_t}* {ec}\n\n"
+        f"*{n}*\n\n*${p:,.0f} MXN* (-{d:.0f}%)\n"
+        f"Normal: ${po:,.0f}\n{ev}\n"
+        f"[COMPRAR AHORA]({u})\n\n"
+        f"_Reventa: ${rl:,.0f} - ${rh:,.0f} MXN_"
     )
 
 
-def formatear_free_fomo(item: dict, n_vip: int,
-                         n_excl: int, delay_min: int) -> str:
-    tienda   = item["tienda"]
-    nombre   = item["nombre"][:55]
-    precio   = item["precio_actual"]
-    precio_o = item["precio_original"]
-    desc     = item["descuento"] * 100
-    url      = item["url"]
-    et       = EMOJIS.get(tienda, "🛍️")
-    ec       = item["categoria"]["emoji"]
-    td       = _nombre_tienda(tienda)
-    ev       = "✅ Envío gratis\n" if item.get("envio_gratis") else ""
-    delay_txt = (f"{delay_min} minutos" if delay_min < 60
-                 else f"{delay_min // 60} hora{'s' if delay_min >= 120 else ''}")
+def fmt_free_fomo(item: dict, n_vip: int, n_excl: int, delay_min: int) -> str:
+    t  = item["tienda"]
+    n  = item["nombre"][:55]
+    p  = item["precio_actual"]
+    po = item["precio_original"]
+    d  = item["descuento"] * 100
+    u  = item["url"]
+    et = EMOJIS.get(t, "🛍")
+    ec = item["categoria"]["emoji"]
+    td = _td(t)
+    ev = "✅ Envío gratis\n" if item.get("envio_gratis") else ""
+    dt = f"{delay_min} min" if delay_min < 60 else f"{delay_min//60}h"
 
-    m  = f"{et} <b>{td}</b> {ec}\n\n"
-    m += f"<b>{nombre}</b>\n\n"
-    m += f"<b>${precio:,.0f} MXN</b> (-{desc:.0f}%)\n"
-    if precio_o > precio:
-        m += f"<s>${precio_o:,.0f}</s>\n"
+    m  = f"{et} <b>{td}</b> {ec}\n\n<b>{n}</b>\n\n"
+    m += f"<b>${p:,.0f} MXN</b> (-{d:.0f}%)\n"
+    if po > p:
+        m += f"<s>${po:,.0f}</s>\n"
     m += ev
-    m += f"\n<a href=\"{url}\">Ver oferta</a>\n\n"
-    m += f"<i>Esta alerta llegó al Canal VIP hace {delay_txt} con análisis de reventa.</i>\n"
+    m += f"\n<a href=\"{u}\">Ver oferta</a>\n\n"
+    m += f"<i>Llegó al Canal VIP hace {dt} con análisis de reventa.</i>\n"
     if n_excl > 0:
-        m += (f"<i>Además hubo {n_excl} "
-              f"oportunidad{'es' if n_excl > 1 else ''} "
-              f"exclusiva{'s' if n_excl > 1 else ''} que no llegan aquí.</i>\n")
+        m += f"<i>Además {n_excl} oferta{'s' if n_excl>1 else ''} exclusiva{'s' if n_excl>1 else ''} que no llegan aquí.</i>\n"
     m += "<i>Los miembros VIP actúan primero.</i>\n"
     if LAUNCHPASS_LINK:
         m += f"\n<a href=\"{LAUNCHPASS_LINK}\">📲 Canal VIP — $299/mes</a>"
@@ -243,107 +247,93 @@ def formatear_free_fomo(item: dict, n_vip: int,
 def procesar_cola_free():
     listos = cola_listos()
     if not listos:
+        logger.info("[COLA FREE] Sin items")
         return
+    cola_limpiar()
     logger.info(f"[COLA FREE] {len(listos)} listos")
-    cola_limpiar_viejos()
 
-    seleccionados = listos[:3]
-    n_excl_total  = max(0, sum(x.get("n_vip", 0) for x in listos) - len(seleccionados))
-    ids_enviados  = []
+    sel   = listos[:3]
+    n_exc = max(0, sum(x.get("n_vip", 0) for x in listos) - len(sel))
+    ids   = []
 
-    for i, entrada in enumerate(seleccionados):
-        item = entrada.get("item", {})
+    for i, e in enumerate(sel):
+        item = e.get("item", {})
         try:
-            created = datetime.fromisoformat(
-                entrada.get("created_at", entrada["send_after"]).replace("Z", ""))
-            delay_min = int((datetime.utcnow() - created).total_seconds() / 60)
+            c = datetime.fromisoformat(
+                e.get("created_at", e["send_after"]).replace("Z", ""))
+            delay = int((datetime.utcnow() - c).total_seconds() / 60)
         except Exception:
-            delay_min = 30
+            delay = 30
 
-        n_excl = n_excl_total if i == 0 else 0
-        msg    = formatear_free_fomo(item, entrada.get("n_vip", 0), n_excl, delay_min)
-        mid    = enviar_mensaje(CHANNEL_FREE_ID, msg, parse_mode="HTML")
+        msg = fmt_free_fomo(item, e.get("n_vip", 0), n_exc if i == 0 else 0, delay)
+        mid = enviar_mensaje(CHANNEL_FREE_ID, msg, parse_mode="HTML")
         if mid:
-            ids_enviados.append(entrada["id"])
+            ids.append(e["id"])
         time.sleep(6)
 
-    if ids_enviados:
-        cola_marcar_enviados(ids_enviados)
-        logger.info(f"[COLA FREE] Enviados: {len(ids_enviados)}")
+    if ids:
+        cola_marcar(ids)
+        logger.info(f"[COLA FREE] Enviados: {len(ids)}")
 
 
 # ─────────────────────────────────────────────
-# ROTACION DE SCRAPERS — 15 tiendas
-# Slot determinado por minuto del run
+# SCRAPERS — rotación de 18 fuentes
 # ─────────────────────────────────────────────
 
-# Prioridad alta (más frecuentes) — slots duplicados
+# (nombre, función, peso)  — peso mayor = se ejecuta más seguido
 SCRAPERS = [
-    # Alta prioridad — cada ~2h
-    ("Walmart",        ciclo_walmart,        2),
-    ("Liverpool",      ciclo_liverpool,      2),
-    ("Amazon",         ciclo_amazon,         2),
-    ("ML-Marcas",      ciclo_marcas,         2),
-    ("Coppel",         ciclo_coppel,         2),
-    # Media prioridad — cada ~3h
-    ("Costco",         ciclo_costco,         2),
-    ("Sam's Club",     ciclo_sams,           2),
-    ("AliExpress",     ciclo_aliexpress,     2),
-    ("Inditex",        ciclo_inditex,        1),
-    ("Petco",          ciclo_petco,          1),
-    # Baja prioridad — cada ~4h
-    ("Sears",          ciclo_sears,          1),
-    ("Palacio",        ciclo_palacio,        1),
-    ("Marcas Directo", ciclo_marcas_directo, 2),
-    ("SHEIN",          ciclo_shein,          1),
-    ("TikTok Trend",   ciclo_tiktok,         1),
+    ("ML Deals API",    ciclo_ml_deals,       3),  # Extra frecuente — alta calidad
+    ("Walmart",         ciclo_walmart,         3),
+    ("Liverpool",       ciclo_liverpool,       3),
+    ("Amazon",          ciclo_amazon,          3),
+    ("ML Marcas",       ciclo_marcas,          2),
+    ("Coppel",          ciclo_coppel,          2),
+    ("Costco",          ciclo_costco,          2),
+    ("Sam's API",       ciclo_sams_api,        2),
+    ("Palacio API",     ciclo_palacio_api,     2),
+    ("Petco API",       ciclo_petco_api,       2),
+    ("AliExpress",      ciclo_aliexpress,      1),
+    ("Inditex",         ciclo_inditex,         1),
+    ("Sears",           ciclo_sears,           1),
+    ("Sam's HTML",      ciclo_sams,            1),
+    ("Palacio HTML",    ciclo_palacio,         1),
+    ("Marcas Directo",  ciclo_marcas_directo,  1),
+    ("TikTok Trend",    ciclo_tiktok,          1),
+    ("Petco HTML",      ciclo_petco,           1),
 ]
 
-
-def _elegir_scraper(slot: int) -> tuple:
-    """Elige el scraper del turno según slot y temporada activa."""
-    # En temporada activa, dar más peso a scrapers relevantes
-    key_t, t_info = temporada_activa()
-
-    # Lista ponderada — scrapers de alta prioridad tienen más chances
-    lista = []
-    for nombre, func, peso in SCRAPERS:
-        # Boost extra si es temporada y el scraper es relevante
-        if t_info and any(k in nombre.lower() for k in ["liverpool", "amazon", "walmart", "costco", "sams"]):
-            lista.extend([(nombre, func)] * (peso + 1))
-        else:
-            lista.extend([(nombre, func)] * peso)
-
-    idx = slot % len(lista)
-    return lista[idx]
+_lista_ponderada = []
+for n, f, p in SCRAPERS:
+    _lista_ponderada.extend([(n, f)] * p)
 
 
-def ejecutar_ciclo_scraper():
-    ahora  = hora_mx()
-    # Slot único por run: hora * 4 + minuto // 15
-    slot   = (ahora.hour * 4 + ahora.minute // 15)
-    nombre, func = _elegir_scraper(slot)
+def ejecutar_ciclo():
+    ahora = hora_mx()
+    slot  = (ahora.hour * 4 + ahora.minute // 15) % len(_lista_ponderada)
+    nombre, func = _lista_ponderada[slot]
 
     try:
-        items = func()
+        items = func() or []
         if not items:
             logger.info(f"[CICLO] {nombre}: sin items")
             return
 
-        vip_este_ciclo = 0
-        _, t_info = temporada_activa()
+        vip_n = 0
+        _, tinfo = temporada_activa()
 
         for item in items:
-            base_score = calcular_heat_score(
-                descuento_real=item["descuento"],
-                stock=99,
-                categoria=item["categoria"]["nombre"],
-                precio_actual=item["precio_actual"],
-                precio_original=item["precio_original"],
-            )
+            try:
+                base_score = calcular_heat_score(
+                    descuento_real=item["descuento"],
+                    stock=99,
+                    categoria=item["categoria"]["nombre"],
+                    precio_actual=item["precio_actual"],
+                    precio_original=item["precio_original"],
+                )
+            except Exception:
+                base_score = 3 if item["descuento"] >= 0.20 else 0
 
-            # Bonus de temporada
-            temp_bonus = score_bonus_temporada(item["categoria"]["nombre"])
+            temp_bonus  = score_bonus_temporada(item["categoria"]["nombre"])
             score_final = min(10, base_score + temp_bonus)
 
             if score_final < 3:
@@ -354,14 +344,17 @@ def ejecutar_ciclo_scraper():
             except Exception:
                 pass
 
-            if score_final >= 6 and vip_este_ciclo < 2:
-                enviar_mensaje(CHANNEL_VIP_ID, formatear_vip_externa(item))
-                vip_este_ciclo += 1
+            if score_final >= 6 and vip_n < 2:
+                enviar_mensaje(CHANNEL_VIP_ID, fmt_vip(item))
+                vip_n += 1
                 time.sleep(3)
 
-            cola_agregar(item, score_final, vip_este_ciclo, delay_min=30)
+            cola_agregar(item, score_final, vip_n, delay_min=30)
 
-        logger.info(f"[CICLO] {nombre} → VIP:{vip_este_ciclo} encolados:{len(items)}")
+        if vip_n > 0:
+            fomo_vip_al_free(vip_n)
+
+        logger.info(f"[CICLO] {nombre} → VIP:{vip_n} encolados:{len(items)}")
 
     except Exception as e:
         logger.error(f"[CICLO] {nombre}: {e}", exc_info=True)
@@ -372,13 +365,10 @@ def ejecutar_ciclo_scraper():
 # ─────────────────────────────────────────────
 
 def tareas_periodicas():
-    ahora = hora_mx()
-    h, m  = ahora.hour, ahora.minute
-    dia   = ahora.weekday()
-
+    a = hora_mx()
+    h, m, dia = a.hour, a.minute, a.weekday()
     if m >= 15:
         return
-
     if h == 21:
         enviar_resumen_diario()
     if h in (11, 18):
@@ -386,31 +376,35 @@ def tareas_periodicas():
     if h in (14, 20):
         enviar_recordatorio_vip()
     if dia == 0 and h == 9:
-        _, t_info = temporada_activa()
-        msg = (
-            "*Reporte semanal exclusivo — DropNode VIP*\n\n"
-            "Esta semana monitoreamos 15 tiendas y marcas.\n\n"
-        )
-        if t_info:
-            msg += f"_{t_info['emoji']} Estamos en temporada {t_info['nombre']} — monitoreo intensivo activo._\n\n"
-        msg += (
-            "Tip de la semana:\n"
-            "_Combina cualquier oferta con los cupones bancarios activos "
-            "— en el canal calculamos el precio real después del banco._\n\n"
+        _, ti = temporada_activa()
+        t_str = f"\n\n_{ti['emoji']} Temporada {ti['nombre']} activa — monitoreo intensivo._" if ti else ""
+        enviar_mensaje(
+            CHANNEL_VIP_ID,
+            f"*Reporte semanal — DropNode VIP*\n\n"
+            f"18 tiendas y fuentes monitoreadas esta semana.{t_str}\n\n"
+            f"_Tip: combina cualquier oferta con cupones bancarios — "
+            f"en el VIP calculamos el precio final automáticamente._\n\n"
             f"{LAUNCHPASS_LINK}"
         )
-        enviar_mensaje(CHANNEL_VIP_ID, msg)
-
-    # Alertas de temporada — preparación y apertura
-    ejecutar_alertas_temporada()
+    try:
+        ejecutar_alertas_temporada()
+    except Exception:
+        pass
 
 
 # ─────────────────────────────────────────────
-# SETUP INICIAL
+# SETUP
 # ─────────────────────────────────────────────
 
-def setup_si_necesario():
+def setup():
     import requests as req
+    # Canal free
+    if not canal_free_tiene_fijado():
+        setup_canal_free()
+    # Grupo — solo si GROUP_ID está configurado
+    if not GROUP_ID:
+        logger.warning("[SETUP] GROUP_ID vacío — skipping grupo setup")
+        return
     try:
         r = req.get(
             f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/getChat",
@@ -420,8 +414,6 @@ def setup_si_necesario():
             enviar_y_fijar_bienvenida_grupo()
     except Exception:
         pass
-    if not canal_free_tiene_fijado():
-        setup_canal_free()
 
 
 # ─────────────────────────────────────────────
@@ -429,21 +421,20 @@ def setup_si_necesario():
 # ─────────────────────────────────────────────
 
 if __name__ == "__main__":
-    ahora_str = hora_mx().strftime("%d/%m/%Y %H:%M")
-    _, t_info = temporada_activa()
-    t_str = f" | {t_info['emoji']} {t_info['nombre']}" if t_info else ""
+    _, tinfo = temporada_activa()
+    t_str = f" | {tinfo['emoji']} {tinfo['nombre']}" if tinfo else ""
     logger.info(
         f"\n{'='*50}\n"
-        f" DROPNODE MX v3.1 — {ahora_str} MX{t_str}\n"
-        f" 15 scrapers activos\n"
+        f" DROPNODE MX v3.2 — {hora_mx().strftime('%d/%m/%Y %H:%M')} MX{t_str}\n"
+        f" 18 fuentes · GitHub Actions\n"
         f"{'='*50}"
     )
 
-    setup_si_necesario()
+    setup()
 
     if dentro_de_horario():
         procesar_cola_free()
-        ejecutar_ciclo_scraper()
+        ejecutar_ciclo()
 
     ejecutar_community_manager()
     tareas_periodicas()
