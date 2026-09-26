@@ -429,45 +429,105 @@ def nivel_oferta(descuento: float, es_flash: bool, es_excl: bool) -> str:
 # HASHTAGS
 # ─────────────────────────────────────────────
 
-def generar_hashtags(nombre, descuento, sc, cupon=False, es_flash=False):
-    n    = nombre.lower()
+def # REEMPLAZAR la función generar_hashtags completa en github_scraper_ml.py
+
+def generar_hashtags(nombre, descuento, sc, cupon=False, es_flash=False, categoria=""):
+    """
+    Genera hashtags relevantes. Usa primero la categoría del item,
+    luego keywords del nombre. Nunca pone #electronica a ropa o salud.
+    """
+    n = nombre.lower()
     tags = []
 
-    if any(w in n for w in ["iphone", "galaxy", "celular", "smartphone", "redmi", "poco"]):
-        tags.append("#celulares")
-    elif any(w in n for w in ["laptop", "notebook", "macbook", "thinkpad", "ideapad"]):
-        tags.append("#laptops")
-    elif any(w in n for w in ["televisor", " tv ", "smart tv", "oled", "qled"]):
-        tags.append("#televisores")
-    elif any(w in n for w in ["audifonos", "airpods", "bocina", "wh-", "wf-"]):
-        tags.append("#audio")
-    elif any(w in n for w in ["playstation", "xbox", "nintendo", "switch", "ps5"]):
-        tags.append("#gaming")
-    elif any(w in n for w in ["tablet", "ipad"]):
-        tags.append("#tablets")
-    elif any(w in n for w in ["smartwatch", "watch", "band"]):
-        tags.append("#wearables")
-    else:
-        tags.append("#electronica")
+    # ── Detectar categoría real por keywords del nombre ──
+    # Salud y belleza
+    if any(w in n for w in ["minoxidil","shampoo","crema","vitamina","suplemento",
+                              "maquillaje","perfume","serum","colágeno","proteína",
+                              "medicamento","farmacia","belleza"]):
+        tags.append("#saludybelleza")
 
+    # Moda y ropa
+    elif any(w in n for w in ["camisa","pantalon","zapato","tenis","vestido","licra",
+                               "leggin","blusa","ropa","calcetín","calcetines","calcetin",
+                               "playera","chamarra","abrigo","short","sudadera","sneaker",
+                               "boot","sandalia","tacón","bota","mocasin","calzado"]):
+        tags.append("#moda")
+
+    # Herramientas
+    elif any(w in n for w in ["llave","taladro","herramienta","martillo","tornillo",
+                               "destornillador","sierra","compresor","impacto","torque",
+                               "soldadora","nivel","cinta métrica"]):
+        tags.append("#herramientas")
+
+    # Hogar y muebles
+    elif any(w in n for w in ["silla","mesa","sofá","sofa","lampara","colchon","cortina",
+                               "toalla","sabana","almohada","edredon","mueble","cajonera"]):
+        tags.append("#hogar")
+
+    # Electrónica — solo si realmente es electrónico
+    elif any(w in n for w in ["iphone","galaxy","celular","smartphone","redmi","poco",
+                               "moto g","moto e"]):
+        tags.append("#celulares")
+    elif any(w in n for w in ["laptop","notebook","macbook","thinkpad","ideapad","chromebook"]):
+        tags.append("#laptops")
+    elif any(w in n for w in ["televisor"," tv ","smart tv","oled","qled","pantalla 4k"]):
+        tags.append("#televisores")
+    elif any(w in n for w in ["audifonos","airpods","bocina","speaker","wh-","wf-","earbuds"]):
+        tags.append("#audio")
+    elif any(w in n for w in ["playstation","xbox","nintendo","switch","ps5","ps4","gaming"]):
+        tags.append("#gaming")
+    elif any(w in n for w in ["tablet","ipad"]):
+        tags.append("#tablets")
+    elif any(w in n for w in ["smartwatch","watch","band","reloj inteligente"]):
+        tags.append("#wearables")
+    elif any(w in n for w in ["cafetera","licuadora","microondas","aspiradora","ventilador",
+                               "electrodoméstico","lavadora","refrigerador","secadora"]):
+        tags.append("#electrodomesticos")
+    elif any(w in n for w in ["impresora","router","switch","cable","usb","monitor","teclado",
+                               "mouse","webcam","memoria","disco duro","ssd"]):
+        tags.append("#computacion")
+
+    # Si la categoría del item está disponible y no detectamos nada
+    elif categoria:
+        cat_lower = categoria.lower().replace(" ", "")
+        tag_cat = f"#{cat_lower}"
+        if len(tag_cat) <= 20:  # Evitar hashtags muy largos
+            tags.append(tag_cat)
+    # Sin fallback a #electronica — mejor sin tag que con tag incorrecto
+
+    # ── Marca ──
     marcas = {
-        "apple":    ["iphone", "ipad", "macbook", "airpods"],
-        "samsung":  ["samsung"], "sony": ["sony"],
-        "lenovo":   ["lenovo", "thinkpad"], "dell": ["dell", "inspiron"],
-        "hp":       [" hp "], "asus": ["asus"],
-        "xiaomi":   ["xiaomi", "redmi", "poco"],
-        "motorola": ["motorola", "moto "], "lg": [" lg "],
+        "apple":    ["iphone","ipad","macbook","airpods"," apple "],
+        "samsung":  ["samsung"],
+        "sony":     ["sony"],
+        "lenovo":   ["lenovo","thinkpad","ideapad"],
+        "dell":     ["dell","inspiron"],
+        "hp":       [" hp ","hewlett"],
+        "asus":     ["asus","rog ","zenbook"],
+        "xiaomi":   ["xiaomi","redmi","poco"],
+        "motorola": ["motorola","moto g","moto e"],
+        "lg":       [" lg "],
+        "hecelo":   ["hecelo"],
+        "bosch":    ["bosch"],
+        "dewalt":   ["dewalt"],
+        "milwaukee":["milwaukee"],
     }
     for marca, kws in marcas.items():
         if any(kw in n for kw in kws):
             tags.append(f"#{marca}")
             break
 
-    if sc >= 8 or descuento >= 0.50: tags.append("#errorprecio")
-    elif descuento >= DESCUENTO_HOT:  tags.append("#hotdeal")
-    if es_flash:                      tags.append("#solohoy")
-    if cupon:                         tags.append("#cupon")
-    if descuento >= REVENTA_TAG_MIN:  tags.append("#reventa")
+    # ── Tipo de oferta ──
+    if sc >= 8 or descuento >= 0.50:
+        tags.append("#errorprecio")
+    elif descuento >= 0.35:
+        tags.append("#hotdeal")
+    if es_flash:
+        tags.append("#solohoy")
+    if cupon:
+        tags.append("#cupon")
+    if descuento >= 0.50:
+        tags.append("#reventa")
 
     return " ".join(tags)
 
@@ -715,34 +775,85 @@ def msg_vip_snippet(item, minutos_atras: int, n_compraron: int = 0):
     return msg
 
 
-def publicar_snippet_fomo(item, minutos_atras: int = 15):
-    """Publica el VIP snippet al canal free después del delay."""
+# REEMPLAZAR publicar_snippet_fomo en github_scraper_ml.py
+# Fix: evita publicar el mismo snippet más de una vez por día
+
+def _snippet_ya_enviado_hoy(item_id: str) -> bool:
+    """Verifica si ya enviamos este item como snippet hoy."""
+    if not db:
+        return False
+    try:
+        desde = datetime.utcnow().replace(hour=0, minute=0, second=0).isoformat()
+        r = db.table("alertas_enviadas").select("id").eq(
+            "producto_id", item_id   # Reusar tabla existente
+        ).eq("canal", "free_snippet").gte("timestamp", desde).execute()
+        return len(r.data) > 0
+    except Exception:
+        return False
+
+def _marcar_snippet_enviado(item_id: str, precio: float):
+    """Marca el snippet como enviado hoy para no repetir."""
+    if not db:
+        return
+    try:
+        db.table("alertas_enviadas").insert({
+            "producto_id":  item_id,
+            "heat_score":   0,
+            "canal":        "free_snippet",
+            "precio_alerta": precio,
+            "descuento_real": 0,
+            "clicks":       0,
+            "timestamp":    datetime.utcnow().isoformat()
+        }).execute()
+    except Exception:
+        pass
+
+def publicar_snippet_fomo(item: dict, minutos_atras: int = 5):
+    """
+    Publica en free lo que VIP recibió (después de que pasó el tiempo).
+    Con dedup: el mismo producto nunca aparece más de una vez por día.
+    """
     if not LAUNCHPASS_LINK:
         return
-    msg = msg_vip_snippet(item, minutos_atras)
-    enviar_con_boton(
-        CHANNEL_FREE_ID, msg,
-        "📲 No volverte a perder uno — Canal VIP",
-        LAUNCHPASS_LINK
-    )
 
+    item_id = item.get("id", item.get("nombre", "")[:20])
 
-def publicar_contador_ahorro_semanal():
-    """Publica el ahorro total de la semana en el canal free cada viernes."""
-    ahorro = get_ahorro_semana()
-    if ahorro < 1000:
+    # ── Verificar que no lo hayamos publicado hoy ──
+    if _snippet_ya_enviado_hoy(item_id):
+        logger.info(f"[SNIPPET] Ya enviado hoy: {item.get('nombre','')[:30]}")
         return
+
+    nombre  = item["nombre"][:55]
+    precio  = item["precio"]
+    p_orig  = item["precio_orig"]
+    desc    = item["descuento"] * 100
+    ahorro  = p_orig - precio
+
     msg = (
-        f"📊 <b>Ahorro total de la comunidad esta semana</b>\n\n"
-        f"<b>${ahorro:,.0f} MXN</b> ahorrados en los últimos 7 días.\n\n"
-        f"<i>Cada peso fue verificado por nuestro equipo antes de publicar.\n"
-        f"Los miembros VIP lideraron los mayores ahorros.</i>"
+        f"⚡ <b>Hace {minutos_atras} min en el Canal VIP:</b>\n\n"
+        f"<b>{nombre}</b>\n"
+        f"bajó a <b>${precio:,.0f} MXN</b> (−{desc:.0f}%)\n"
+        f"Ahorro real: ${ahorro:,.0f} MXN\n\n"
+        f"<i>Ya se agotó. Los que estaban en el VIP lo vieron primero.</i>"
     )
-    enviar_con_boton(
-        CHANNEL_FREE_ID, msg,
-        "📲 Unirme al Canal VIP — $299/mes",
-        LAUNCHPASS_LINK
-    )
+
+    try:
+        payload = {
+            "chat_id":                  CHANNEL_FREE_ID,
+            "text":                     msg,
+            "parse_mode":               "HTML",
+            "disable_web_page_preview": True,
+            "reply_markup": {"inline_keyboard": [[{
+                "text": "📲 No volverte a perder uno — Canal VIP",
+                "url":  LAUNCHPASS_LINK
+            }]]}
+        }
+        r = requests.post(TELEGRAM_API + "/sendMessage", json=payload, timeout=15)
+        if r.json().get("ok"):
+            _marcar_snippet_enviado(item_id, precio)
+            logger.info(f"[SNIPPET] Publicado: {nombre[:30]}")
+    except Exception as e:
+        logger.error(f"[SNIPPET] {e}")
 
 
 # ─────────────────────────────────────────────
