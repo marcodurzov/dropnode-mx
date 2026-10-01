@@ -1,0 +1,26 @@
+name: DropNode Diagnóstico
+
+on:
+  workflow_dispatch:     # solo manual: Actions -> DropNode Diagnóstico -> Run workflow
+
+jobs:
+  diag:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+      - run: pip install -r requirements.txt
+      - name: Diagnóstico
+        run: python diagnostico.py
+        env:
+          TELEGRAM_TOKEN:  ${{ secrets.TELEGRAM_TOKEN }}
+          SUPABASE_URL:    ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY:    ${{ secrets.SUPABASE_KEY }}
+          ML_APP_ID:       ${{ secrets.ML_APP_ID }}
+          ML_SECRET:       ${{ secrets.ML_SECRET }}
+          ADMIN_CHAT_ID:   ${{ secrets.ADMIN_CHAT_ID }}
+          PROXY_URL:       ${{ secrets.PROXY_URL }}
