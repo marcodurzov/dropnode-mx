@@ -7,6 +7,7 @@
 # =============================================================
 
 import requests, time, random, logging
+import ml_api
 
 logger = logging.getLogger(__name__)
 
@@ -246,7 +247,7 @@ def buscar_marca_en_ml(query: str, descuento_min: float = 0.20) -> list:
     """
     try:
         esperar(3, 7)
-        resp = requests.get(ML_SEARCH_API, params={
+        resp = ml_api.get(ML_SEARCH_API, params={
             "q": query,
             "condition": "new",
             "sort": "relevance",
