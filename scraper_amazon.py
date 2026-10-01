@@ -27,7 +27,7 @@ def get_headers():
         "User-Agent":      random.choice(USER_AGENTS),
         "Accept-Language": "es-MX,es;q=0.9",
         "Accept":          "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        "Accept-Encoding": "gzip, deflate, br",
+        "Accept-Encoding": "gzip, deflate",
         "Connection":      "keep-alive",
     }
 
