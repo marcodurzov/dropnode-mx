@@ -7,6 +7,7 @@
 # =============================================================
 
 import requests
+import ml_api
 import time
 import random
 import logging
@@ -286,7 +287,7 @@ def scrape_ml_oferta_del_dia() -> list:
     for ep in endpoints:
         try:
             _esperar()
-            resp = requests.get(ep["url"], params=ep["params"],
+            resp = ml_api.get(ep["url"], params=ep["params"],
                                 headers=_h("https://www.mercadolibre.com.mx/"),
                                 timeout=15)
             if resp.status_code != 200:
@@ -341,7 +342,7 @@ def scrape_ml_por_categoria(cat_id: str, cat_n: str, cat_e: str,
     """
     try:
         _esperar()
-        resp = requests.get(
+        resp = ml_api.get(
             f"{ML_API}/sites/MLM/search",
             params={
                 "category": cat_id,
@@ -376,7 +377,7 @@ def scrape_ml_mas_vendidos_oferta() -> list:
     for cat_id, cat_n, cat_e in cats:
         try:
             _esperar()
-            resp = requests.get(
+            resp = ml_api.get(
                 f"{ML_API}/sites/MLM/search",
                 params={
                     "category": cat_id,
