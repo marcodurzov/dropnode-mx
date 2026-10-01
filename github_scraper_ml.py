@@ -1,8 +1,17 @@
+# =============================================================
+# DROPNODE MX — github_scraper_ml.py v12
+# v12: horarios centralizados (horarios.py), modo nocturno VIP (score>=8),
+#      NADA de sleep de 3600 s: lo que pasa al free entra a la cola de 60 min
+#      (cola_free) y lo publica main.py. Sin snippets de 'ya se agotó'.
+# =============================================================
 import os, time, random, logging, sys, requests
 import datetime as _dt
 from datetime import datetime, timedelta, timezone
 from supabase import create_client
 from playwright.sync_api import sync_playwright
+import horarios as H
+import estado as E
+import ml_api
 
 logging.basicConfig(level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s", stream=sys.stdout)
@@ -90,14 +99,9 @@ def get_stats(pid, precio_actual):
 # ─────────────────────────────────────────────
 # CONFIGURACION
 # ─────────────────────────────────────────────
-HORA_FREE_INICIO   = 8
-HORA_FREE_FIN      = 22
 DESCUENTO_HOT      = 0.35
 MAX_VIP            = 12
 MAX_FREE           = 4
-VENTAJA_SEG        = 180
-VIP_EXCL_DESCUENTO = 0.35
-VIP_EXCL_SCORE     = 7
 
 # Páginas ML — Flash primero, luego base, luego categorías rotativas
 PAGINAS_FLASH = [
@@ -140,7 +144,7 @@ USER_AGENTS = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124.0.0.0 Safari/537.36",
 ]
 
-JS_EXTRACT = """
+JS_EXTRACT = r"""
 () => {
     var productos = [];
     var cards = document.querySelectorAll('.poly-card,.andes-card,[class*="ui-search-result"],[class*="promotions-item"]');
@@ -286,10 +290,7 @@ def ml_api_fallback(limit=50):
     ]
     for url in endpoints[:1]:
         try:
-            r = requests.get(url, headers={
-                "User-Agent": random.choice(USER_AGENTS),
-                "Accept": "application/json",
-            }, timeout=15)
+            r = ml_api.get(url, timeout=15)
             if r.status_code != 200: continue
             for item in r.json().get("results",[]):
                 p = float(item.get("price",0))
@@ -316,6 +317,10 @@ def ml_api_fallback(limit=50):
 # ─────────────────────────────────────────────
 # TELEGRAM
 # ─────────────────────────────────────────────
+def _md(t):
+    return str(t).replace("_", " ").replace("*", "").replace("[", "(").replace("]", ")").replace("`", "")
+
+
 def enviar(chat_id, texto, modo="Markdown"):
     try:
         r = requests.post(TELEGRAM_API+"/sendMessage", json={
@@ -324,6 +329,11 @@ def enviar(chat_id, texto, modo="Markdown"):
         d = r.json()
         if d.get("ok"): return d["result"]["message_id"]
         logger.warning("[TG] "+str(d.get("description","")))
+        if "parse" in str(d.get("description","")).lower():
+            r = requests.post(TELEGRAM_API+"/sendMessage", json={"chat_id":chat_id,"text":texto,
+                "disable_web_page_preview":True}, timeout=15)
+            d = r.json()
+            if d.get("ok"): return d["result"]["message_id"]
     except Exception as e: logger.error("[TG] "+str(e))
     return None
 
@@ -437,7 +447,7 @@ def _vida(descuento, stock, es_flash):
     return ""
 
 def msg_vip(item, stats):
-    nombre=item["nombre"][:65]; precio=item["precio"]; p_orig=item["precio_orig"]
+    nombre=_md(item["nombre"][:65]); precio=item["precio"]; p_orig=item["precio_orig"]
     desc=item["descuento"]*100; stk=item["stock"]; lnk=link_ml(item["url"],item["id"])
     sc=item["score"]; cupon=item.get("tiene_cupon",False)
     c_monto=item.get("cupon_monto",0); p_cupon=item.get("precio_con_cupon",precio)
@@ -477,7 +487,7 @@ def msg_vip(item, stats):
     return m
 
 def msg_vip_caption(item, stats):
-    nombre=item["nombre"][:50]; precio=item["precio"]; p_orig=item["precio_orig"]
+    nombre=_md(item["nombre"][:50]); precio=item["precio"]; p_orig=item["precio_orig"]
     desc=item["descuento"]*100; stk=item["stock"]; lnk=link_ml(item["url"],item["id"])
     sc=item["score"]; cupon=item.get("tiene_cupon",False)
     c_monto=item.get("cupon_monto",0); p_cupon=item.get("precio_con_cupon",precio)
@@ -508,66 +518,6 @@ def msg_vip_caption(item, stats):
     ht = generar_hashtags(nombre, item["descuento"], sc, cupon, es_flash)
     if ht: m += f"\n{ht}"
     return m[:1024]
-
-def msg_free(item, n_excl=0, mins_vip=5):
-    nombre=item["nombre"][:55]; precio=item["precio"]; p_orig=item["precio_orig"]
-    desc=item["descuento"]*100; stk=item["stock"]; lnk=link_ml(item["url"],item["id"])
-    sc=item["score"]; cupon=item.get("tiene_cupon",False)
-    c_monto=item.get("cupon_monto",0); p_cupon=item.get("precio_con_cupon",precio)
-    ev=item.get("envio_gratis",False)
-    es_excl=(item["descuento"]>=VIP_EXCL_DESCUENTO or sc>=VIP_EXCL_SCORE
-             or item.get("es_flash"))
-    nivel="🔴" if es_excl else ("🟠" if item["descuento"]>=0.30 else "🟡")
-    stxt=_stk(stk,bold=False)
-    m  = f"{nivel} <b>{nombre}</b>\n\n"
-    m += f"<b>${precio:,.0f} MXN</b> <i>(-{desc:.0f}%)</i>\n"
-    if p_orig>precio: m += f"<s>${p_orig:,.0f}</s>\n"
-    if ev: m += "✅ Envío gratis\n"
-    if cupon and c_monto>0: m += f"🎟️ Con cupón: <b>${p_cupon:,.0f} MXN</b>\n"
-    if stxt: m += f"<b>{stxt}</b>\n"
-    m += f"\n<a href=\"{lnk}\">Ver oferta en Mercado Libre</a>\n\n"
-    if es_excl:
-        m += f"<i>🔴 Esta alerta llegó al Canal VIP hace {mins_vip} minutos. Las 🔴 nunca se publican completas aquí.</i>\n"
-    else:
-        m += "<i>Esta alerta llegó al Canal VIP primero con análisis de reventa completo.</i>\n"
-    if n_excl>0:
-        m += f"<i>Además {n_excl} oferta{'s' if n_excl>1 else ''} exclusiva{'s' if n_excl>1 else ''} 🔴 que no llegan aquí.</i>\n"
-    if stk is not None and stk<=5:
-        m += "<i>Varios miembros VIP ya la vieron. Quedan pocas unidades.</i>\n"
-    if LAUNCHPASS_LINK:
-        m += f"\n<a href=\"{LAUNCHPASS_LINK}\">📲 Canal VIP — $299/mes</a>"
-    return m
-
-# ── Snippet FOMO con dedup ──
-def _snippet_ya_hoy(item_id):
-    if not db: return False
-    try:
-        desde=datetime.utcnow().replace(hour=0,minute=0,second=0).isoformat()
-        r=db.table("alertas_enviadas").select("id").eq(
-            "producto_id",item_id).eq("canal","free_snippet").gte("timestamp",desde).execute()
-        return len(r.data)>0
-    except: return False
-
-def publicar_snippet_fomo(item, mins=5):
-    if not LAUNCHPASS_LINK: return
-    item_id=item.get("id","")
-    if _snippet_ya_hoy(item_id): return
-    nombre=item["nombre"][:55]; precio=item["precio"]
-    p_orig=item["precio_orig"]; desc=item["descuento"]*100; ahorro=p_orig-precio
-    msg=(f"⚡ <b>Hace {mins} min en el Canal VIP:</b>\n\n"
-         f"<b>{nombre}</b>\nbajó a <b>${precio:,.0f} MXN</b> (−{desc:.0f}%)\n"
-         f"Ahorro real: ${ahorro:,.0f} MXN\n\n"
-         f"<i>Ya se agotó. Los que estaban en el VIP lo vieron primero.</i>")
-    try:
-        r=requests.post(TELEGRAM_API+"/sendMessage", json={
-            "chat_id":CHANNEL_FREE_ID,"text":msg,"parse_mode":"HTML",
-            "disable_web_page_preview":True,
-            "reply_markup":{"inline_keyboard":[[{"text":"📲 No perderte el siguiente — Canal VIP","url":LAUNCHPASS_LINK}]]}
-        }, timeout=15)
-        if r.json().get("ok"):
-            guardar_alerta(item_id,0,"free_snippet",precio,item["descuento"])
-            logger.info(f"[SNIPPET] {nombre[:30]}")
-    except Exception as e: logger.error(f"[SNIPPET] {e}")
 
 # ─────────────────────────────────────────────
 # PROCESAMIENTO
@@ -607,137 +557,100 @@ def procesar(prod_raw, pagina_es_flash=False):
 # ─────────────────────────────────────────────
 # MAIN
 # ─────────────────────────────────────────────
-def main():
-    hora_mx_dt=datetime.now(TZ_MEXICO); hora=hora_mx_dt.hour
-    logger.info(f"[GITHUB v11] {hora_mx_dt.strftime('%d/%m %H:%M')} MX")
-    es_horario_free=HORA_FREE_INICIO<=hora<HORA_FREE_FIN
-    es_madrugada=hora<7
+def _a_cola(item, n_vip, en_vip):
+    """Item ML -> formato estándar de cola_free (con link de afiliado ya aplicado)."""
+    return {
+        "tienda": "mercadolibre", "nombre": item["nombre"], "precio_actual": item["precio"],
+        "precio_original": item["precio_orig"], "descuento": item["descuento"], "sku": item["id"],
+        "url": link_ml(item["url"], item["id"]), "thumbnail": item.get("thumbnail", ""),
+        "cat_nombre": "Mercado Libre", "cat_emoji": "🛒", "envio_gratis": item.get("envio_gratis", False),
+        "es_flash": item.get("es_flash", False), "en_vip": en_vip,
+    }
 
-    todos=[]
+
+def main():
+    ahora = H.ahora()
+    hora = ahora.hour
+    hoy = H.fecha_mx(ahora)
+    logger.info(f"[GITHUB v12] {ahora.strftime('%d/%m %H:%M')} MX · VIP={'sí' if H.en_horario_vip() else 'NOCTURNO'}")
+
+    todos = []
+    total_scrapeado = 0
     with sync_playwright() as pw:
-        browser=pw.chromium.launch(headless=True,
-            args=["--no-sandbox","--disable-setuid-sandbox",
-                  "--disable-dev-shm-usage","--disable-gpu"])
-        ctx=browser.new_context(user_agent=random.choice(USER_AGENTS),
-            locale="es-MX",timezone_id="America/Mexico_City",
-            viewport={"width":1366,"height":768})
-        page=ctx.new_page()
-        total_scrapeado=0
+        browser = pw.chromium.launch(headless=True,
+            args=["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage", "--disable-gpu"])
+        ctx = browser.new_context(user_agent=random.choice(USER_AGENTS), locale="es-MX",
+            timezone_id="America/Mexico_City", viewport={"width": 1366, "height": 768})
+        page = ctx.new_page()
         for pagina in PAGINAS:
-            items_pag=scrape_pagina(page,pagina)
+            items_pag = scrape_pagina(page, pagina)
             for prod_raw in items_pag:
-                it=procesar(prod_raw,pagina_es_flash=pagina.get("es_flash",False))
+                it = procesar(prod_raw, pagina_es_flash=pagina.get("es_flash", False))
                 if it: todos.append(it)
-            total_scrapeado+=len(items_pag)
-            time.sleep(random.uniform(2,4))
+            total_scrapeado += len(items_pag)
+            time.sleep(random.uniform(2, 4))
         browser.close()
 
-    # Si Playwright no encontró nada, usar API de ML como fallback
     if total_scrapeado < 10:
         logger.warning(f"[GITHUB] Solo {total_scrapeado} items en Playwright — activando API fallback")
         for prod_raw in ml_api_fallback(50):
-            it=procesar(prod_raw)
+            it = procesar(prod_raw)
             if it: todos.append(it)
+    E.log_fuente("ML Playwright", total_scrapeado, "" if total_scrapeado else "0 items")
 
-    # Dedup — mayor score gana
-    seen={}
+    seen = {}
     for a in todos:
         if a:
-            ex=seen.get(a["id"])
-            if ex is None or a["score"]>ex["score"]: seen[a["id"]]=a
-    unicos=list(seen.values())
-    unicos.sort(key=lambda x:(x.get("es_flash",False),x["score"]),reverse=True)
+            ex = seen.get(a["id"])
+            if ex is None or a["score"] > ex["score"]: seen[a["id"]] = a
+    unicos = list(seen.values())
+    unicos.sort(key=lambda x: (x.get("es_flash", False), x["score"]), reverse=True)
     logger.info(f"[GITHUB] Únicos >=15%: {len(unicos)} flash:{sum(1 for x in unicos if x.get('es_flash'))}")
 
-    vip_n=0; free_n=0; ids_vip_excl=set(); items_vip=[]
-
+    # ── VIP (6:30 AM-11:30 PM normal · resto del día solo score >= 8) ──
+    vip_n = 0; ids_vip = set(); ids_excl = set()
     for item in unicos:
-        if vip_n>=MAX_VIP: break
-        if es_madrugada and not item.get("es_flash") and item["descuento"]<DESCUENTO_HOT: continue
-        es_excl=(item["descuento"]>=VIP_EXCL_DESCUENTO or item["score"]>=VIP_EXCL_SCORE
-                 or item.get("es_flash"))
-        thumb=item.get("thumbnail",""); caption=msg_vip_caption(item,item.get("stats",{}))
-        if thumb and len(thumb)>10 and thumb.startswith("http"):
-            mid=enviar_foto(CHANNEL_VIP_ID,thumb,caption)
+        if vip_n >= MAX_VIP: break
+        if not H.vip_puede_publicar(item["score"]):
+            continue
+        es_excl = H.es_exclusivo(item["descuento"], item["score"], item.get("es_flash"))
+        thumb = item.get("thumbnail", "")
+        if thumb and len(thumb) > 10 and thumb.startswith("http"):
+            mid = enviar_foto(CHANNEL_VIP_ID, thumb, msg_vip_caption(item, item.get("stats", {})))
         else:
-            mid=enviar(CHANNEL_VIP_ID,msg_vip(item,item.get("stats",{})))
+            mid = enviar(CHANNEL_VIP_ID, msg_vip(item, item.get("stats", {})))
         if mid:
-            guardar_alerta(item.get("pid"),item["score"],"vip",item["precio"],item["descuento"])
-            vip_n+=1; items_vip.append(item)
-            if es_excl: ids_vip_excl.add(item["id"])
-            if item["score"]>=8 and MAKE_WEBHOOK_URL:
+            guardar_alerta(item.get("pid"), item["score"], "vip", item["precio"], item["descuento"])
+            vip_n += 1; ids_vip.add(item["id"])
+            if es_excl: ids_excl.add(item["id"])
+            if item["score"] >= 8 and MAKE_WEBHOOK_URL:
                 try:
-                    requests.post(MAKE_WEBHOOK_URL,json={
-                        "nombre":item["nombre"][:80],"precio":str(round(item["precio"])),
-                        "descuento":str(round(item["descuento"]*100)),
-                        "thumbnail":item.get("thumbnail",""),"link":item["url"],
-                        "score":item["score"],"es_flash":item.get("es_flash",False)
-                    },timeout=10)
+                    requests.post(MAKE_WEBHOOK_URL, json={
+                        "nombre": item["nombre"][:80], "precio": str(round(item["precio"])),
+                        "descuento": str(round(item["descuento"] * 100)), "thumbnail": item.get("thumbnail", ""),
+                        "link": item["url"], "score": item["score"], "es_flash": item.get("es_flash", False)}, timeout=10)
                 except: pass
         time.sleep(5)
 
-    # FOMO por exclusivos
-    if ids_vip_excl and es_horario_free:
-        n_excl=len(ids_vip_excl)
-        try:
-            import json as _json
-            payload={"chat_id":CHANNEL_FREE_ID,
-                "text":(f"🔒 <b>{n_excl} oferta{'s' if n_excl>1 else ''} exclusiva{'s' if n_excl>1 else ''}</b> "
-                        f"acaban de publicarse en el Canal VIP.\n\n"
-                        f"<i>No llegan aquí — solo disponibles para miembros VIP.</i>"),
-                "parse_mode":"HTML","disable_web_page_preview":True}
-            if LAUNCHPASS_LINK:
-                payload["reply_markup"]={"inline_keyboard":[[{"text":"📲 Canal VIP","url":LAUNCHPASS_LINK}]]}
-            requests.post(TELEGRAM_API+"/sendMessage",json=payload,timeout=15)
-        except: pass
-        time.sleep(3)
+    # ── Hacia el free: SIEMPRE por la cola, 60 min después (lo publica main.py) ──
+    encolados = 0
+    candidatos = [x for x in unicos if x["score"] >= 2 and H.puede_pasar_al_free(x["descuento"], x["score"], x.get("es_flash"))]
+    for item in sorted(candidatos, key=lambda x: x["score"], reverse=True)[:8]:
+        if E.reclamar_evento(f"cola:mercadolibre:{item['id']}:{hoy}", fallback=True):
+            if E.cola_agregar(_a_cola(item, vip_n, item["id"] in ids_vip), item["score"], vip_n, delay_min=H.VENTAJA_VIP_MIN):
+                encolados += 1
 
-    if vip_n>0 and es_horario_free:
-        logger.info(f"[GITHUB] Esperando {VENTAJA_SEG//60} min ventaja VIP...")
-        time.sleep(VENTAJA_SEG)
+    # ── Teaser (sin revelar producto): solo en horario free, máximo 1 cada 2 h ──
+    if ids_excl and H.en_horario_free() and E.reclamar_evento(f"fomo:{hoy}:{hora // 2}", fallback=False):
+        n = len(ids_excl)
+        E.tg_send(CHANNEL_FREE_ID, f"🔒 El Canal VIP tiene <b>{n} oferta{'s' if n > 1 else ''} exclusiva{'s' if n > 1 else ''}</b> hoy.\n\n<i>No se publican aquí.</i>",
+                  boton=("📲 Ver Canal VIP", LAUNCHPASS_LINK))
 
-    # Free — solo items NO exclusivos VIP
-    if es_horario_free:
-        candidatos=[x for x in unicos if x["id"] not in ids_vip_excl and x["score"]>=2][:MAX_FREE]
-        if not candidatos and unicos:
-            candidatos=sorted(unicos,key=lambda x:x["score"])[:1]
-        n_excl_msg=len(ids_vip_excl); mins_vip=VENTAJA_SEG//60
-        for item in candidatos:
-            mid=enviar(CHANNEL_FREE_ID,msg_free(item,n_excl_msg,mins_vip),"HTML")
-            if mid:
-                guardar_alerta(item.get("pid"),item["score"],"free",item["precio"],item["descuento"])
-                free_n+=1; n_excl_msg=0; mins_vip=0
-            time.sleep(6)
-        # Snippet FOMO del mejor exclusivo VIP
-        if ids_vip_excl and items_vip:
-            mejor_excl=next((x for x in items_vip if x["id"] in ids_vip_excl),None)
-            if mejor_excl:
-                time.sleep(10)
-                publicar_snippet_fomo(mejor_excl, mins=VENTAJA_SEG//60)
+    if hora == 7 and vip_n == 0 and E.reclamar_evento(f"buenos_dias:{hoy}", fallback=False):
+        enviar(CHANNEL_VIP_ID, "🌅 *Buenos días — DropNode VIP*\n\nEl equipo ya está revisando Solo Hoy, Remates y todas las secciones.\n_Solo publicamos cuando hay algo real._")
 
-    # Resumen sin alertas en hora pico
-    if free_n==0 and hora in (12,19) and unicos:
-        top=unicos[:5]; msg=f"📋 <b>Mejores precios de hoy — DropNode MX</b>\n\n"
-        msg+="<i>Nuestro equipo revisó todo. Estos destacan:</i>\n\n"
-        for i,it in enumerate(top,1):
-            lnk=link_ml(it["url"],it["id"]); d=it["descuento"]*100
-            nivel="🔴" if it["id"] in ids_vip_excl else ("🟠" if it["descuento"]>=0.30 else "🟡")
-            ln=f"{i}. {nivel} <b>{it['nombre'][:45]}</b>\n"
-            ln+=f"   <b>${it['precio']:,.0f} MXN</b> (-{d:.0f}%)"
-            if it.get("envio_gratis"): ln+=" ✅"
-            ln+=f" <a href=\"{lnk}\">Ver</a>"; msg+=ln+"\n\n"
-        if LAUNCHPASS_LINK:
-            msg+="<i>Los 🔴 van al VIP primero y nunca se publican completas aquí.</i>\n"
-            msg+=f"<a href=\"{LAUNCHPASS_LINK}\">📲 Canal VIP</a>"
-        enviar(CHANNEL_FREE_ID,msg,"HTML"); free_n+=1
+    logger.info(f"[GITHUB v12] VIP:{vip_n} Excl:{len(ids_excl)} Cola free:{encolados}")
 
-    if hora==7 and vip_n==0:
-        enviar(CHANNEL_VIP_ID,
-            "🌅 *Buenos días — DropNode VIP*\n\n"
-            "Ya estamos monitoreando Solo Hoy, Remates y todas las secciones.\n"
-            "_Solo publicamos cuando hay algo real._")
 
-    logger.info(f"[GITHUB v11] VIP:{vip_n} Free:{free_n} Excl:{len(ids_vip_excl)}")
-
-if __name__=="__main__":
+if __name__ == "__main__":
     main()
