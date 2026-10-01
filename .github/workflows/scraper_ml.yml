@@ -2,11 +2,16 @@ name: DropNode ML Scraper
 
 on:
   schedule:
-    - cron: '0 14-23 * * *'
-    - cron: '30 14-23 * * *'
-    - cron: '0 0-4 * * *'
-    - cron: '30 0-4 * * *'
+    # Horas en UTC (México = UTC-6). 6:00 AM-11:59 PM MX cada 30 min;
+    # 12:00-5:59 AM MX cada hora (solo para errores de precio score 8+).
+    - cron: '0,30 12-23 * * *'
+    - cron: '0,30 0-5 * * *'
+    - cron: '0 6-11 * * *'
   workflow_dispatch:
+
+concurrency:
+  group: dropnode-ml
+  cancel-in-progress: false
 
 jobs:
   scrape:
@@ -42,4 +47,6 @@ jobs:
           LAUNCHPASS_LINK: ${{ secrets.LAUNCHPASS_LINK }}
           MAKE_WEBHOOK_URL: ${{ secrets.MAKE_WEBHOOK_URL }}
           SCRAPER_API_KEY: ${{ secrets.SCRAPER_API_KEY }}
+          ADMIN_CHAT_ID: ${{ secrets.ADMIN_CHAT_ID }}
+          PROXY_URL: ${{ secrets.PROXY_URL }}
         run: python github_scraper_ml.py
