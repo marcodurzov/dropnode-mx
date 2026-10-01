@@ -4,8 +4,13 @@
 # Determina si una alerta va a VIP, Free, o se descarta
 # =============================================================
 
-import logging
+import logging, unicodedata
 logger = logging.getLogger(__name__)
+
+
+def _n(x):
+    return unicodedata.normalize("NFKD", str(x or "")).encode("ascii", "ignore").decode().lower().strip()
+
 
 # ─────────────────────────────────────────────
 #  CATEGORÍAS DE ALTO VALOR PARA FLIPPERS
@@ -33,6 +38,10 @@ PRECIO_MINIMO_CATEGORIA = {
     "Herramientas":     300,
     "Deportes":         200,
 }
+
+
+_CAT_N = {_n(k): v for k, v in CATEGORIAS_FLIPEABLE.items()}
+_PREC_N = {_n(k): v for k, v in PRECIO_MINIMO_CATEGORIA.items()}
 
 
 def calcular_heat_score(descuento_real: float, stock: int,
@@ -71,7 +80,7 @@ def calcular_heat_score(descuento_real: float, stock: int,
         score += 0.2   # <20% = marginal
 
     # ── 2. CATEGORÍA FLIPEABLE (0-3 pts) ─────────────
-    puntos_cat = CATEGORIAS_FLIPEABLE.get(categoria, 0.5)
+    puntos_cat = _CAT_N.get(_n(categoria), 0.5)
     score += puntos_cat
 
     # ── 3. URGENCIA DE STOCK (0-2 pts) ───────────────
@@ -90,7 +99,7 @@ def calcular_heat_score(descuento_real: float, stock: int,
 
     # ── 4. TICKET MÍNIMO (0-1 pt) ────────────────────
     # Productos muy baratos no valen el ruido en el canal
-    precio_min = PRECIO_MINIMO_CATEGORIA.get(categoria, 200)
+    precio_min = _PREC_N.get(_n(categoria), 200)
     if precio_actual >= precio_min * 3:
         score += 1.0   # Producto de ticket alto en oferta
     elif precio_actual >= precio_min:
