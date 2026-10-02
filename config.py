@@ -1,5 +1,7 @@
 # =============================================================
-# DROPNODE MX — config.py   (v1.9)
+# DROPNODE MX — config.py   (v2.0)
+# v2.0: SIN SECRETOS. Todo lo sensible se lee de variables de entorno
+#       (GitHub -> Settings -> Secrets and variables -> Actions).
 # + Timezone Mexico City (UTC-6)
 # + Umbrales ajustados para generar contenido diario
 # + Multiples tiendas activadas
@@ -7,20 +9,31 @@
 
 import os
 
-SUPABASE_URL = "https://zssrlvchovlcehhlvdfm.supabase.co"
-SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inpzc3JsdmNob3ZsY2VoaGx2ZGZtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzU1MzkzMzAsImV4cCI6MjA5MTExNTMzMH0.-MPnRXkAiepKchuPlMwN17RsKhhUPHFBj2qNgHw3Dfw"
 
-TELEGRAM_TOKEN   = "8608754195:AAGaJNwtnAEh_N15cJOXP-1F0qVp0Yixlps"
-CHANNEL_FREE_ID  = -1003897783132
-CHANNEL_VIP_ID   = -1003840453350
-GROUP_ID         = -1003848632862
+def _env(nombre, default=""):
+    return str(os.environ.get(nombre, default) or default).strip()
+
+
+def _env_int(nombre, default=0):
+    try:
+        return int(_env(nombre, str(default)))
+    except Exception:
+        return default
+
+SUPABASE_URL = _env("SUPABASE_URL")
+SUPABASE_KEY = _env("SUPABASE_KEY")
+
+TELEGRAM_TOKEN   = _env("TELEGRAM_TOKEN")
+CHANNEL_FREE_ID  = _env_int("CHANNEL_FREE_ID", -1003897783132)
+CHANNEL_VIP_ID   = _env_int("CHANNEL_VIP_ID", -1003840453350)
+GROUP_ID         = _env_int("GROUP_ID", -1003848632862)
 
 ML_AFFILIATE_ID  = "marcodurzo"
 AMAZON_TAG       = "dropnodemx-20"
 EBAY_CAMPAIGN_ID = "5339151577"
 EBAY_CUSTOM_ID   = "dropnodemx"
 LAUNCHPASS_LINK  = "https://www.launchpass.com/marcodurzo/dropnodemxvip"
-MAKE_WEBHOOK_URL = "https://hook.us2.make.com/olbtuv7aj22knwmx5z3adgjj2fr1sy6i"
+MAKE_WEBHOOK_URL = _env("MAKE_WEBHOOK_URL")
 
 # --- TIMEZONE ---
 # Mexico City / Guadalajara / Monterrey — UTC-6 (sin horario de verano desde 2023)
