@@ -543,8 +543,8 @@ def procesar(prod_raw, pagina_es_flash=False):
         if descuento < (0.05 if es_remate else 0.15): return None
         pid=upsert_prod(link,nombre,"ML Ofertas",item_id)
         guardar_precio(pid,precio,p_orig or precio,stk or 0)
-        if alerta_hoy(pid): return None
         sc=score(descuento,stk,precio,cupon,ev,es_flash)
+        if not E.puede_publicar_pid(pid,sc,precio,"vip"): return None   # política de repeticiones (estado.py)
         stats=get_stats(pid,precio)
         thumb_hd=thumb.replace("I.jpg","O.jpg") if thumb else ""
         return {"id":item_id,"pid":pid,"nombre":nombre,"precio":precio,
