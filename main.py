@@ -162,7 +162,7 @@ def procesar_cola_free():
         usados.append(e["id"])
         if not item.get("nombre") or not item.get("url"):
             continue
-        if E.item_hoy_publicado(item, "free"):
+        if not E.puede_publicar_item(item, e.get("score", 0), "free"):
             continue
         mid = E.tg_send(FREE, fmt_free(item), boton=BTN_VIP,
                         foto=item["thumbnail"] if str(item.get("thumbnail", "")).startswith("http") else None)
@@ -253,7 +253,7 @@ def _correr_fuente(nombre, func):
             except Exception:
                 pass
             # ── VIP ──
-            if sf >= 5 and vip_n < 2 and H.vip_puede_publicar(sf) and not E.item_hoy_publicado(item, "vip"):
+            if sf >= 5 and vip_n < 2 and H.vip_puede_publicar(sf) and E.puede_publicar_item(item, sf, "vip"):
                 mid = E.tg_send(VIP, fmt_vip(item, sf),
                                 foto=item["thumbnail"] if item["thumbnail"].startswith("http") else None)
                 if mid:
