@@ -255,6 +255,70 @@ def item_hoy_publicado(item, canal="vip"):
 
 
 # ─────────────────────────────────────────────
+# Política de repeticiones
+#   score < 8  -> el producto sale UNA sola vez por ventana
+#   score >= 8 -> hasta 3 veces por ventana, separadas al menos 4 h
+#   siempre se permite si el precio bajó >= 15% vs la última alerta
+#   (otro vendedor del mismo producto = otro producto = no cuenta)
+# ─────────────────────────────────────────────
+REP_VENTANA_DIAS = 14
+REP_SCORE_ALTO = 8
+REP_ALTO_MAX = 3
+REP_ALTO_GAP_H = 4
+REP_BAJA_PRECIO = 0.15
+
+
+def _pid_de(item):
+    db = get_db()
+    if not db:
+        return None
+    r = db.table("productos").select("id").eq("sku", sku_de(item)).eq("tienda", item.get("tienda", "")).limit(1).execute()
+    return r.data[0]["id"] if r.data else None
+
+
+def puede_publicar_pid(pid, score, precio, canal="vip"):
+    """True si la política permite publicar (de nuevo) este producto en ese canal."""
+    db = get_db()
+    if not pid or not db:
+        return True
+    desde = (datetime.utcnow() - timedelta(days=REP_VENTANA_DIAS)).isoformat()
+    rows = db.table("alertas_enviadas").select("precio_alerta,timestamp") \
+        .eq("producto_id", pid).eq("canal", canal).gte("timestamp", desde) \
+        .order("timestamp", desc=True).limit(20).execute().data or []
+    if not rows:
+        return True
+    p_ult = float(rows[0].get("precio_alerta") or 0)
+    if p_ult > 0 and precio and precio <= p_ult * (1 - REP_BAJA_PRECIO):
+        return True                                   # bajó de precio de verdad: es información nueva
+    if score >= REP_SCORE_ALTO:
+        if len(rows) >= REP_ALTO_MAX:
+            return False
+        try:
+            ult = datetime.fromisoformat(str(rows[0]["timestamp"]).replace("Z", "").split("+")[0])
+            return (datetime.utcnow() - ult) >= timedelta(hours=REP_ALTO_GAP_H)
+        except Exception:
+            return True
+    return False
+
+
+def puede_publicar_item(item, score, canal="vip", guardia_dia=True):
+    """Versión para items sueltos (main.py). Si la BD falla, cae al candado de 1 vez por día."""
+    try:
+        if get_db():
+            ok = puede_publicar_pid(_pid_de(item), score, float(item.get("precio_actual") or 0), canal)
+            if not ok:
+                return False
+            # cinturón: si el registro en BD fallara, igual no repetir un score bajo el mismo día
+            if guardia_dia and score < REP_SCORE_ALTO:
+                clave = f"item:{canal}:{item.get('tienda','')}:{sku_de(item)}:{datetime.utcnow().strftime('%Y%m%d')}"
+                return reclamar_evento(clave, fallback=True)
+            return True
+    except Exception as e:
+        logger.warning(f"[REPETICION] {e}")
+    return not item_hoy_publicado(item, canal)
+
+
+# ─────────────────────────────────────────────
 # Registro de publicaciones (alimenta resúmenes)
 # ─────────────────────────────────────────────
 def registrar_publicacion(item, canal, score, msg_id=None):
