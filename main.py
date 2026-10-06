@@ -1,5 +1,5 @@
 # =============================================================
-# DROPNODE MX — main.py v3.6
+# DROPNODE MX — main.py v3.7
 # GitHub Actions cada 15 min. Cambios vs v3.5:
 #   - Horarios/reglas centralizados (horarios.py)
 #   - Cola VIP->Free de 60 min (TODO el free sale de aquí, también ML)
@@ -217,9 +217,20 @@ SCRAPERS = [
     ("SHEIN",          ciclo_shein, 1),
     ("AliExpress",     ciclo_aliexpress, 1),
 ]
-_pool = []
-for _n, _f, _p in SCRAPERS:
-    _pool.extend([(_n, _f)] * _p)
+def _armar_pool():
+    """Fuentes con 3+ corridas y 0 con productos en 24 h se prueban poco (peso 1);
+    las que sí traen productos conservan su peso. Así no se desperdician corridas en tiendas bloqueadas."""
+    try:
+        salud = E.salud_fuentes(24)
+    except Exception:
+        salud = {}
+    pool = []
+    for nombre, func, peso in SCRAPERS:
+        c, ok, _tot = salud.get(nombre, (0, 0, 0))
+        if c >= 3 and ok == 0:
+            peso = 1
+        pool.extend([(nombre, func)] * peso)
+    return pool
 
 
 def _correr_fuente(nombre, func):
@@ -276,6 +287,7 @@ def _correr_fuente(nombre, func):
 def ejecutar_ciclo():
     a = H.ahora()
     slot = a.hour * 4 + a.minute // 15
+    _pool = _armar_pool()
     n = len(_pool)
     elegidas, vistos = [], set()
     for idx in (slot % n, (slot + n // 2) % n):
@@ -359,7 +371,7 @@ def _safe(nombre, fn):
 
 if __name__ == "__main__":
     t = T.actual()
-    logger.info(f"\n{'=' * 52}\n DROPNODE MX v3.6 — {H.ahora().strftime('%d/%m/%Y %H:%M')} MX · {t['emoji']} {t['nombre']}"
+    logger.info(f"\n{'=' * 52}\n DROPNODE MX v3.7 — {H.ahora().strftime('%d/%m/%Y %H:%M')} MX · {t['emoji']} {t['nombre']}"
                 f"{' · 🌙 NOCTURNO' if H.modo_nocturno() else ''}\n VIP 6:30-23:30 · Free 8:00-19:00 · ventana 60 min · {len(SCRAPERS)} fuentes\n{'=' * 52}")
     _safe("setup", setup)
     _safe("cola_free", procesar_cola_free)
