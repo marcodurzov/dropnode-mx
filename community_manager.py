@@ -204,13 +204,40 @@ def tendencia_semana():
             "¿Te sorprende? ¿Qué tendencia ves tú en tus compras? 👇")
 
 
+def _deal_desde_bd():
+    """Mejor descuento publicado en el VIP en las últimas 24 h (no depende de la API de ML)."""
+    db = E.get_db()
+    if not db:
+        return None
+    try:
+        desde = (datetime.utcnow() - timedelta(hours=24)).isoformat()
+        filas = E.fetch_all(lambda: db.table("alertas_enviadas").select("producto_id,precio_alerta,descuento_real")
+                            .eq("canal", "vip").gte("timestamp", desde), max_pages=3)
+        filas = [f for f in filas if f.get("producto_id") and 0.2 <= float(f.get("descuento_real") or 0) < 0.9
+                 and float(f.get("precio_alerta") or 0) > 0]
+        if not filas:
+            return None
+        mejor = max(filas, key=lambda f: float(f["descuento_real"]))
+        p = db.table("productos").select("nombre,url").eq("id", mejor["producto_id"]).limit(1).execute().data
+        if not p:
+            return None
+        precio, d = float(mejor["precio_alerta"]), float(mejor["descuento_real"])
+        return {"nombre": p[0]["nombre"], "url": p[0]["url"], "precio_actual": precio,
+                "precio_original": precio / (1 - d), "descuento": d}
+    except Exception as e:
+        logger.warning(f"[DEAL BD] {e}")
+        return None
+
+
 def deal_del_dia():
+    d = None
     try:
         from scraper_api import get_deal_del_dia
         d = get_deal_del_dia()
     except Exception as e:
         logger.warning(f"[DEAL] {e}")
-        return False
+    if not d:
+        d = _deal_desde_bd()
     if not d:
         return False
     t = T.actual()
