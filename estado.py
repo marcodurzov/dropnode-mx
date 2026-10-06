@@ -191,6 +191,9 @@ def admin_msg(texto, clave=None):
     if not ADMIN_CHAT_ID:
         logger.info(f"[ADMIN] (sin ADMIN_CHAT_ID) {texto[:120]}")
         return None
+    if str(ADMIN_CHAT_ID).strip() == str(TELEGRAM_TOKEN).split(":")[0]:
+        logger.warning("[ADMIN] ADMIN_CHAT_ID es el ID del BOT, no el tuyo: escríbele /id al bot y usa el número que responde")
+        return None
     if clave and not reclamar_evento(clave, fallback=False):
         return None
     return tg_send(ADMIN_CHAT_ID, texto)
