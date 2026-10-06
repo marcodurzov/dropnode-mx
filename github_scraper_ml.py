@@ -12,6 +12,9 @@ from playwright.sync_api import sync_playwright
 import horarios as H
 import estado as E
 import ml_api
+import re, unicodedata
+import temporada_calendario as T
+import peticiones as P
 
 logging.basicConfig(level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s", stream=sys.stdout)
@@ -137,7 +140,39 @@ PAGINAS_CAT = [
 
 _hora_run = _dt.datetime.utcnow().hour
 _idx      = (_hora_run // 2) % len(PAGINAS_CAT)
-PAGINAS   = PAGINAS_FLASH + PAGINAS_BASE + PAGINAS_CAT[_idx:_idx+2]
+
+
+def _slug(texto):
+    """'Traje de baño niño' -> 'traje-de-bano-nino' (para listado.mercadolibre.com.mx/...)."""
+    t = unicodedata.normalize("NFKD", str(texto or "")).encode("ascii", "ignore").decode().lower()
+    return re.sub(r"[^a-z0-9]+", "-", t).strip("-")[:60]
+
+
+def _paginas_dinamicas():
+    """Temporada del mes (2 búsquedas rotativas) + lo que la comunidad pidió (máx. 2).
+    Se leen con el navegador porque la API de búsqueda de ML responde 403."""
+    out = []
+    try:
+        t = T.actual()
+        for q in T.queries_rotativas(2):
+            sl = _slug(q)
+            if sl:
+                out.append({"url": f"https://listado.mercadolibre.com.mx/{sl}", "nombre": f"Temporada: {q}",
+                            "emoji": t["emoji"], "es_flash": False})
+    except Exception as e:
+        logger.warning(f"[TEMPORADA] {e}")
+    try:
+        for texto in P.get_peticiones_como_keywords()[:2]:
+            sl = _slug(texto)
+            if sl:
+                out.append({"url": f"https://listado.mercadolibre.com.mx/{sl}", "nombre": f"Pedido: {texto[:30]}",
+                            "emoji": "🎯", "es_flash": False})
+    except Exception as e:
+        logger.warning(f"[PETICIONES] {e}")
+    return out
+
+
+PAGINAS   = PAGINAS_FLASH + PAGINAS_BASE + PAGINAS_CAT[_idx:_idx+2] + _paginas_dinamicas()
 
 USER_AGENTS = [
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/124.0.0.0 Safari/537.36",
@@ -597,6 +632,12 @@ def main():
             it = procesar(prod_raw)
             if it: todos.append(it)
     E.log_fuente("ML Playwright", total_scrapeado, "" if total_scrapeado else "0 items")
+    for it in todos:
+        try:
+            if it and it["descuento"] >= 0.20:
+                P.verificar_match(it["nombre"], it["url"], it["precio"], it["descuento"])
+        except Exception:
+            pass
 
     seen = {}
     for a in todos:
