@@ -28,6 +28,9 @@ BLOQUEO = ["access denied", "captcha", "px-captcha", "just a moment", "cf-chl", 
            "are you a human", "request unsuccessful", "unusual traffic", "akamai", "errors.edgesuite",
            "enable javascript and cookies", "pardon our interruption"]
 MIN_DESC = 0.15
+MIN_PRECIO = 150            # debajo de esto no vale la pena una alerta (y suele ser precio por unidad)
+MAX_DESC = 0.85             # arriba de esto casi siempre es dato roto
+MAX_DESC_HTML = 0.75        # la heurística HTML se equivoca más: tope más estricto
 
 # clave: (nombre visible, emoji, base, [urls de ofertas/home], vtex?)
 TIENDAS = {
@@ -85,35 +88,43 @@ def _sesion():
         "Accept-Encoding": "gzip, deflate",            # sin 'br': requests no lo decodifica
         "Upgrade-Insecure-Requests": "1",
     })
-    p = os.environ.get("PROXY_URL", "").strip()
-    if p:
-        s.proxies.update({"http": p, "https": p})
     return s
 
 
+def _intento(s, url, referer, proxies=None):
+    """(html, status, nota) de UN intento."""
+    try:
+        h = {"Referer": referer} if referer else {}
+        r = s.get(url, headers=h, timeout=25, allow_redirects=True, proxies=proxies)
+        txt = r.text or ""
+        low = txt[:6000].lower()
+        if r.status_code in (403, 429, 503) or any(b in low for b in BLOQUEO) and len(txt) < 60000:
+            return txt, r.status_code, "BLOQUEADA"
+        if r.status_code != 200:
+            return txt, r.status_code, f"HTTP {r.status_code}"
+        if len(txt) < 1500:
+            return txt, r.status_code, "VACIA"
+        return txt, r.status_code, ""
+    except Exception as e:
+        return "", 0, f"ERROR {str(e)[:80]}"
+
+
 def descargar(url, sesion=None, referer=None, espera=(2, 5)):
-    """(html, status, nota). nota: '', 'BLOQUEADA', 'VACIA' o el error."""
+    """(html, status, nota). nota: '', 'BLOQUEADA', 'VACIA' o el error.
+    Primero directo (gratis); si lo bloquean y hay PROXY_URL, reintenta por el proxy
+    (así el plan de GB del proxy solo se gasta en las tiendas que lo necesitan)."""
     s = sesion or _sesion()
-    for intento in range(2):
-        try:
-            time.sleep(random.uniform(*espera))
-            h = {"Referer": referer} if referer else {}
-            r = s.get(url, headers=h, timeout=25, allow_redirects=True)
-            txt = r.text or ""
-            low = txt[:6000].lower()
-            if r.status_code in (403, 429, 503) or any(b in low for b in BLOQUEO) and len(txt) < 60000:
-                if intento == 0:
-                    continue
-                return txt, r.status_code, "BLOQUEADA"
-            if r.status_code != 200:
-                return txt, r.status_code, f"HTTP {r.status_code}"
-            if len(txt) < 1500:
-                return txt, r.status_code, "VACIA"
-            return txt, r.status_code, ""
-        except Exception as e:
-            if intento == 1:
-                return "", 0, f"ERROR {str(e)[:80]}"
-    return "", 0, "ERROR"
+    time.sleep(random.uniform(*espera))
+    txt, st, nota = _intento(s, url, referer)
+    if nota in ("BLOQUEADA",) or nota.startswith("ERROR"):
+        p = os.environ.get("PROXY_URL", "").strip()
+        if p:
+            time.sleep(random.uniform(1, 3))
+            txt2, st2, nota2 = _intento(s, url, referer, proxies={"http": p, "https": p})
+            if not nota2:
+                return txt2, st2, ""
+            return txt2, st2, nota2 + " [proxy]"
+    return txt, st, nota
 
 
 def _abs(base, href):
@@ -171,10 +182,10 @@ def extraer_jsonld(soup, base):
 # ─────────────────────────────────────────────
 # Estrategia 2: JSON embebido
 # ─────────────────────────────────────────────
-_K_NOMBRE = ("productName", "displayName", "name", "title")
-_K_PRECIO = ("salePrice", "sellingPrice", "currentPrice", "finalPrice", "price", "activePrice", "Price")
+_K_NOMBRE = ("productName", "productDisplayName", "displayName", "name", "title")
+_K_PRECIO = ("salePrice", "sellingPrice", "currentPrice", "finalPrice", "promoPrice", "minimumPromoPrice", "price", "activePrice", "Price")
 _K_ORIG = ("wasPrice", "listPrice", "ListPrice", "originalPrice", "regularPrice", "priceBeforeDiscount",
-           "oldPrice", "compareAtPrice", "previousPrice", "basePrice", "strikePrice", "highPrice")
+           "oldPrice", "compareAtPrice", "previousPrice", "basePrice", "strikePrice", "highPrice", "maximumListPrice")
 _K_URL = ("canonicalUrl", "productUrl", "url", "link", "linkText", "permalink", "href", "slug")
 _K_IMG = ("thumbnailUrl", "imageUrl", "image", "img", "thumbnail", "primaryImage")
 
@@ -360,15 +371,19 @@ def _categoria(nombre):
     return ("Ofertas", "🛍️")
 
 
-def _a_item(clave, r):
+def _a_item(clave, r, estrategia=""):
     nombre_t, emoji_t, base, _, _ = TIENDAS[clave]
     nombre = re.sub(r"\s+", " ", str(r.get("nombre", ""))).strip()
     precio, orig = float(r.get("precio") or 0), float(r.get("orig") or 0)
     url = r.get("url") or ""
-    if not nombre or precio <= 0 or orig <= precio or not url.startswith("http"):
+    if not nombre or precio < MIN_PRECIO or orig <= precio or not url.startswith("http"):
         return None
     desc = (orig - precio) / orig
-    if desc < MIN_DESC or desc > 0.92:                   # >92% casi siempre es dato roto
+    tope = MAX_DESC_HTML if estrategia == "html" else MAX_DESC
+    if desc < MIN_DESC or desc > tope:
+        return None
+    ratio = orig / precio
+    if 9.5 <= ratio <= 10.5:                       # típico error: precio por unidad vs total
         return None
     cat_n, cat_e = _categoria(nombre)
     return {"tienda": clave, "nombre": nombre[:90], "precio_actual": precio, "precio_original": orig,
@@ -377,7 +392,48 @@ def _a_item(clave, r):
             "envio_gratis": False}
 
 
-def scrapear_tienda(clave, diag=None, max_paginas=4):
+def _renderizar(url, espera_ms=4000):
+    """HTML ya ejecutado con JavaScript (Playwright). '' si no se puede."""
+    if os.environ.get("RENDER_JS", "1") != "1":
+        return ""
+    try:
+        from playwright.sync_api import sync_playwright
+        with sync_playwright() as pw:
+            b = pw.chromium.launch(headless=True, args=["--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu"])
+            ctx = b.new_context(user_agent=random.choice(UA), locale="es-MX", timezone_id="America/Mexico_City",
+                                viewport={"width": 1366, "height": 900})
+            page = ctx.new_page()
+            page.goto(url, wait_until="domcontentloaded", timeout=35000)
+            page.wait_for_timeout(espera_ms)
+            page.evaluate("window.scrollBy(0, 2500)")
+            page.wait_for_timeout(1500)
+            html_ = page.content()
+            b.close()
+            return html_
+    except Exception as e:
+        logger.warning(f"[RENDER] {url[:60]}: {str(e)[:80]}")
+        return ""
+
+
+def _estrategias(paginas, base, detalle, clave):
+    """Corre las 3 estrategias sobre las páginas; devuelve lista de (estrategia, crudo)."""
+    crudos = []
+    for estrategia, fn in (("jsonld", extraer_jsonld), ("json_embebido", extraer_json_embebido),
+                           ("html", extraer_html)):
+        total = 0
+        for u, soup in paginas:
+            try:
+                got = fn(soup, base)
+            except Exception as e:
+                logger.debug(f"[MULTI {clave}] {estrategia}: {e}")
+                got = []
+            total += len(got)
+            crudos += [(estrategia, g) for g in got]
+        detalle["estrategias"][estrategia] = detalle["estrategias"].get(estrategia, 0) + total
+    return crudos
+
+
+def scrapear_tienda(clave, diag=None, max_paginas=4, muestras_dir=None):
     """Devuelve items estándar. Si `diag` (dict) se pasa, se llena con detalle."""
     if clave not in TIENDAS:
         return []
@@ -396,6 +452,8 @@ def scrapear_tienda(clave, diag=None, max_paginas=4):
             continue
         soup = BeautifulSoup(html_, "html.parser")
         paginas.append((u, soup))
+        if muestras_dir and len(paginas) == 1:
+            _guardar_muestra(muestras_dir, f"{clave}_crudo.html", html_)
         if i == 0:
             descubiertas = [d for d in _descubrir(soup, base) if d not in urls]
     for u in descubiertas:
@@ -406,36 +464,49 @@ def scrapear_tienda(clave, diag=None, max_paginas=4):
         if not nota and html_:
             paginas.append((u, BeautifulSoup(html_, "html.parser")))
 
-    for estrategia, fn in (("jsonld", extraer_jsonld), ("json_embebido", extraer_json_embebido),
-                           ("html", extraer_html)):
-        total = 0
-        for u, soup in paginas:
-            try:
-                got = fn(soup, base)
-            except Exception as e:
-                logger.debug(f"[MULTI {clave}] {estrategia}: {e}")
-                got = []
-            total += len(got)
-            crudos += got
-        detalle["estrategias"][estrategia] = total
+    crudos = _estrategias(paginas, base, detalle, clave)
     if vtex or not crudos:
         got, nota = extraer_vtex(base, s)
         detalle["estrategias"]["vtex"] = len(got) if not nota else nota
-        crudos += got
+        crudos += [("vtex", g) for g in got]
+
+    # Si la página carga pero no trae productos en el HTML crudo: renderizar con JavaScript
+    if not crudos and paginas:
+        rend = []
+        for u, _ in paginas[:2]:
+            h2 = _renderizar(u)
+            if h2:
+                rend.append((u, BeautifulSoup(h2, "html.parser")))
+                if muestras_dir and len(rend) == 1:
+                    _guardar_muestra(muestras_dir, f"{clave}_renderizado.html", h2)
+        detalle["renderizadas"] = len(rend)
+        d2 = {"estrategias": {}}
+        crudos = _estrategias(rend, base, d2, clave)
+        detalle["estrategias_render"] = d2["estrategias"]
 
     items, vistos = [], set()
-    for r in crudos:
-        it = _a_item(clave, r)
+    for est, r in crudos:
+        it = _a_item(clave, r, est)
         if it and it["sku"] not in vistos:
             vistos.add(it["sku"])
             items.append(it)
     items.sort(key=lambda x: x["descuento"], reverse=True)
     detalle["items"] = len(items)
+    detalle["candidatos_crudos"] = len(crudos)
     if diag is not None:
         diag.update(detalle)
         diag["muestra"] = [(i["nombre"][:40], i["precio_actual"], i["precio_original"]) for i in items[:2]]
     logger.info(f"[MULTI {clave}] páginas={len(paginas)} items={len(items)} {detalle['estrategias']}")
     return items[:15]
+
+
+def _guardar_muestra(carpeta, nombre, contenido, tope=900_000):
+    try:
+        os.makedirs(carpeta, exist_ok=True)
+        with open(os.path.join(carpeta, nombre), "w", encoding="utf-8") as f:
+            f.write(contenido[:tope])
+    except Exception:
+        pass
 
 
 def ejecutar_ciclo_multi(clave):
