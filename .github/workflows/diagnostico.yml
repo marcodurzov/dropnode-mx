@@ -6,7 +6,7 @@ on:
 jobs:
   diag:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -14,6 +14,8 @@ jobs:
           python-version: '3.11'
           cache: 'pip'
       - run: pip install -r requirements.txt
+      - name: Instalar navegador (para páginas con JavaScript)
+        run: playwright install --with-deps chromium
       - name: Diagnóstico
         run: python diagnostico.py
         env:
@@ -24,3 +26,11 @@ jobs:
           ML_SECRET:       ${{ secrets.ML_SECRET }}
           ADMIN_CHAT_ID:   ${{ secrets.ADMIN_CHAT_ID }}
           PROXY_URL:       ${{ secrets.PROXY_URL }}
+      - name: Subir muestras de HTML
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: muestras
+          path: muestras/
+          if-no-files-found: ignore
+          retention-days: 7
