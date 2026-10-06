@@ -13,7 +13,7 @@ concurrency:
 jobs:
   run:
     runs-on: ubuntu-latest
-    timeout-minutes: 12
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -21,6 +21,8 @@ jobs:
           python-version: '3.11'
           cache: 'pip'
       - run: pip install -r requirements.txt
+      - name: Instalar navegador (solo se usa si una tienda necesita JavaScript)
+        run: playwright install --with-deps chromium
       - name: Ejecutar bot
         run: python main.py
         env:
@@ -39,4 +41,5 @@ jobs:
           ADMIN_CHAT_ID:        ${{ secrets.ADMIN_CHAT_ID }}      # opcional (tu ID de Telegram)
           PROXY_URL:            ${{ secrets.PROXY_URL }}          # opcional (anyIP)
           ENABLE_CUPONES:       "0"
+          RENDER_JS:            "1"
           TIMEZONE_OFFSET_HOURS: "-6"
