@@ -22,6 +22,7 @@ jobs:
           cache: 'pip'
       - run: pip install -r requirements.txt
       - name: Instalar navegador (solo se usa si una tienda necesita JavaScript)
+        continue-on-error: true      # si falla, el bot sigue (el render JS es opcional)
         run: playwright install --with-deps chromium
       - name: Ejecutar bot
         run: python main.py
