@@ -1,4 +1,4 @@
-[HANDOFF.md](https://github.com/user-attachments/files/33117233/HANDOFF.md)
+[HANDOFF.md](https://github.com/user-attachments/files/33214301/HANDOFF.md)
 # DropNode MX — HANDOFF (pega este archivo al inicio de una conversación nueva)
 
 > Mantén este archivo en la raíz del repo `marcodurzov/dropnode-mx` y en los archivos del Proyecto de Claude.
@@ -40,6 +40,10 @@ Nuevos (opcionales pero recomendados): ML_APP_ID, ML_SECRET (token de la API de 
 | Coppel | timeout (descarta IPs de datacenter) | Igual: proxy. |
 | Liverpool | `shoppingapi.liverpool.com.mx` ya no existe; la web carga | Falta afinar selectores con las muestras HTML. |
 | Costco, HEB, Sears, Amazon | cargan, 0 productos | Se prueba render con JavaScript; afinar con las muestras HTML (artefacto `muestras`). |
+
+## Verificación antes de cobrar
+Corre Actions → "DropNode Diagnóstico". La sección "0) ¿LISTO PARA OPERAR?" (`chequeo.py`) revisa token, permisos del bot, tablas, secrets y lo publicado en 24 h. Debe terminar en "LISTO: sin fallas críticas".
+Nota: Playwright debe ser >= 1.49 (en Ubuntu 24.04 la 1.40 no instala navegadores); la instalación del navegador en bot.yml es opcional (`continue-on-error`).
 
 ## Pendientes / riesgos conocidos
 1. SEGURIDAD: `config.py` v2.0 ya no tiene secretos (lee variables de entorno), pero los valores viejos siguen en el historial de git del repo público. Deben estar revocados: token de Telegram (BotFather), clave anon de Supabase (RLS activado + clave service_role en secrets) y webhook de Make. Marcar aquí cuándo se hizo.
