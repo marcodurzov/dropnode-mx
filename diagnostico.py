@@ -23,7 +23,17 @@ def out(s=""):
 
 MUESTRAS = "muestras"
 
-out("== 1) SUPABASE ==")
+out("== 0) ¿LISTO PARA OPERAR? ==")
+try:
+    import chequeo
+    _lineas, _fallas = chequeo.correr()
+    for _l in _lineas:
+        out(_l)
+    out(f"\n>> {'LISTO: sin fallas críticas' if _fallas == 0 else str(_fallas) + ' falla(s) crítica(s) por resolver antes de cobrar'}")
+except Exception as _e:
+    out(f"(chequeo no disponible: {str(_e)[:100]})")
+
+out("\n== 1) SUPABASE ==")
 out(str(E.db_health()))
 out(f"PROXY_URL configurado: {'SÍ' if os.environ.get('PROXY_URL','').strip() else 'NO'}")
 
