@@ -1,4 +1,4 @@
-[HANDOFF.md](https://github.com/user-attachments/files/33258038/HANDOFF.md)
+[HANDOFF.md](https://github.com/user-attachments/files/33268099/HANDOFF.md)
 # DropNode MX — HANDOFF (pega este archivo al inicio de una conversación nueva)
 
 > Mantén este archivo en la raíz del repo `marcodurzov/dropnode-mx` y en los archivos del Proyecto de Claude.
@@ -13,7 +13,7 @@ Regla no negociable: NUNCA mencionar automatización en público. Todo es "el eq
 |---|---|---|
 | VIP | 6:30 AM–11:30 PM; de 11:31 PM a 6:29 AM solo score ≥ 8 | `horarios.py` |
 | FREE | 8:00 AM–7:00 PM; nada de 7:01 PM a 7:59 AM | `horarios.py` |
-| VIP → FREE | 60 min, siempre por la cola `cola_free`; las 🔴 exclusivas no pasan (solo salen en el resumen) | `horarios.py` (`EXCLUSIVOS_PASAN_AL_FREE`) |
+| VIP → FREE | 60 min, siempre por la cola `cola_free`; solo los errores de precio (score ≥ 8) se quedan únicamente en el VIP | `horarios.py` (`FREE_BLOQUEA_SCORE`) |
 | Cierre FREE | 6:00–7:00 PM, "Mejores precios de hoy" | `resumenes.py` |
 | Cierre VIP | 11:00–11:30 PM, con ahorro del día/semana/mes/total | `resumenes.py` |
 | Temporadas | calendario por mes (scraper + score + comunidad) | `temporada_calendario.py` |
@@ -31,12 +31,13 @@ Regla no negociable: NUNCA mencionar automatización en público. Todo es "el eq
 TELEGRAM_TOKEN, CHANNEL_FREE_ID, CHANNEL_VIP_ID, GROUP_ID, SUPABASE_URL, SUPABASE_KEY, LAUNCHPASS_LINK, ML_AFFILIATE_ID, AMAZON_TAG, MAKE_WEBHOOK_URL
 Nuevos (opcionales pero recomendados): ML_APP_ID, ML_SECRET (token de la API de ML), ADMIN_CHAT_ID (tu ID; escríbele /id al bot en privado), PROXY_URL (anyIP).
 
-## Estado real de las fuentes (diagnóstico del 08-oct-2026, desde GitHub Actions)
+## Estado real de las fuentes (diagnósticos del 08 y 09-oct-2026, desde GitHub Actions)
 | Fuente | Resultado | Nota |
 |---|---|---|
 | API de búsqueda de Mercado Libre | 403 aun con token de aplicación | `/sites/MLM/search` no sirve. Sí responden 200 con token: `products/search`, `highlights`, `trends`, `categories`. Ruta nueva: `scraper_ml_catalogo.py` (highlights -> producto -> /items). |
-| ML con navegador (Playwright) | 8-oct-2026: 0 productos en 24 h (¿bloqueo o cambio de diseño?) | Ver sección 2c del diagnóstico; con proxy reintenta solo. |
-| Sam's | carga y saca candidatos | Había falsos positivos (precio por unidad); ya hay filtros de sanidad en `scraper_multi.py`. |
+| ML con navegador (Playwright) | Intermitente: ML muestra "Hubo un error accediendo a esta pagina" a IPs de GitHub (1 de 6 corridas sacó productos) | v4.1: huella de navegador realista (`navegador.py`), 2 intentos directos + 1 con proxy, corre cada 15 min. Solución estable: proxy residencial. |
+| ML API catálogo | `highlights` da ids, pero `/products/{id}` y `/sites/MLM/search` dan 403 | Ruta descartada; se quitaron las fuentes que dependían de ella. |
+| Sam's, Costco | cargan, pero los "descuentos" eran mensualidades (precio/4) | v4.1 rechaza razones ≈ 4, 6, 9, 10, 12, 18, 24 en la heurística HTML; puede quedar en 0 hasta afinar selectores con las muestras. |
 | Palacio, Elektra, Walmart, Bodega | bloqueadas (403 / reto anti-bot) | Requieren proxy residencial (`PROXY_URL`); aun así no está garantizado. |
 | Coppel | timeout (descarta IPs de datacenter) | Igual: proxy. |
 | Liverpool | `shoppingapi.liverpool.com.mx` ya no existe; la web carga | Falta afinar selectores con las muestras HTML. |
