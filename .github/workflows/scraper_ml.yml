@@ -2,10 +2,10 @@ name: DropNode ML Scraper
 
 on:
   schedule:
-    # Horas en UTC (México = UTC-6). 6:00 AM-11:59 PM MX cada 30 min;
+    # Horas en UTC (México = UTC-6). 6:00 AM-11:59 PM MX cada 15 min;
     # 12:00-5:59 AM MX cada hora (solo para errores de precio score 8+).
-    - cron: '0,30 12-23 * * *'
-    - cron: '0,30 0-5 * * *'
+    - cron: '*/15 12-23 * * *'
+    - cron: '*/15 0-5 * * *'
     - cron: '0 6-11 * * *'
   workflow_dispatch:
 
