@@ -103,11 +103,21 @@ def items_por_ids(ids):
     return out
 
 
+_PRODUCTOS_403 = {"v": False}
+
+
 def item_id_de_producto(pid):
-    """ID del item ganador (buy box) de un producto de catálogo."""
+    """ID del item ganador (buy box) de un producto de catálogo.
+    (Con la app actual /products/{id} responde 403: tras el primer 403 ya no se insiste.)"""
+    if _PRODUCTOS_403["v"]:
+        return None
     try:
         time.sleep(random.uniform(0.2, 0.5))
-        d = _json(get(f"{API}/products/{pid}")) or {}
+        r = get(f"{API}/products/{pid}")
+        if r.status_code == 403:
+            _PRODUCTOS_403["v"] = True
+            return None
+        d = _json(r) or {}
         bb = d.get("buy_box_winner") or {}
         return bb.get("item_id")
     except Exception:
