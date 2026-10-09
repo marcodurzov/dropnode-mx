@@ -286,8 +286,7 @@ def extraer_vtex(base, sesion):
 # Estrategia 4: heurística HTML
 # ─────────────────────────────────────────────
 _SEL_VIEJO = ("s, del, strike, [class*='old'], [class*='before'], [class*='was'], [class*='list-price'], "
-              "[class*='listPrice'], [class*='original'], [class*='tachado'], [class*='strike'], "
-              "[class*='regular'], [class*='compare']")
+              "[class*='listPrice'], [class*='original'], [class*='tachado'], [class*='strike']")
 
 
 def extraer_html(soup, base):
@@ -315,7 +314,7 @@ def extraer_html(soup, base):
                 precios.append(v)
         if not precios:
             continue
-        precio = min(precios)
+        precio = max(precios)        # el precio real es el más alto debajo del tachado; los menores suelen ser mensualidades
         a = nodo.find("a", href=True)
         img = nodo.find("img")
         nombre = ""
@@ -404,8 +403,8 @@ def _a_item(clave, r, estrategia="", razones=None):
     if desc > tope:
         return no("descuento_sospechoso")
     ratio = orig / precio
-    if 9.5 <= ratio <= 10.5:                       # típico error: precio por unidad vs total
-        return no("relacion_10_a_1")
+    if estrategia == "html" and any(abs(ratio - n) / n < 0.012 for n in (4, 6, 9, 10, 12, 18, 24)):
+        return no("parece_mensualidad")             # "4 pagos de $X", meses sin intereses, precio por unidad…
     cat_n, cat_e = _categoria(nombre)
     return {"tienda": clave, "nombre": nombre[:90], "precio_actual": precio, "precio_original": orig,
             "descuento": desc, "sku": hashlib.md5(url.split("?")[0].encode()).hexdigest()[:14],
@@ -419,11 +418,9 @@ def _renderizar(url, espera_ms=4000):
         return ""
     try:
         from playwright.sync_api import sync_playwright
+        import navegador as NAV
         with sync_playwright() as pw:
-            b = pw.chromium.launch(headless=True, args=["--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu"])
-            ctx = b.new_context(user_agent=random.choice(UA), locale="es-MX", timezone_id="America/Mexico_City",
-                                viewport={"width": 1366, "height": 900})
-            page = ctx.new_page()
+            b, page = NAV.lanzar(pw)
             page.goto(url, wait_until="domcontentloaded", timeout=35000)
             page.wait_for_timeout(espera_ms)
             page.evaluate("window.scrollBy(0, 2500)")
