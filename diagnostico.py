@@ -96,9 +96,8 @@ try:
     os.makedirs(MUESTRAS, exist_ok=True)
     with sync_playwright() as pw:
         for etiqueta, u in _urls:
-            b = pw.chromium.launch(headless=True, args=["--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu"])
-            ctx = b.new_context(locale="es-MX", timezone_id="America/Mexico_City", viewport={"width": 1366, "height": 768})
-            pg = ctx.new_page()
+            import navegador as _NAV
+            b, pg = _NAV.lanzar(pw)
             try:
                 pg.goto(u, wait_until="domcontentloaded", timeout=30000)
                 pg.wait_for_timeout(5000)
