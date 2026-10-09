@@ -15,6 +15,7 @@ import ml_api
 import re, unicodedata
 import temporada_calendario as T
 import peticiones as P
+import navegador as NAV
 
 logging.basicConfig(level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s", stream=sys.stdout)
@@ -299,29 +300,16 @@ JS_EXTRACT = r"""
 _DIAG = {"txt": ""}
 
 
-def _proxy_cfg():
-    """PROXY_URL (http://usuario:clave@host:puerto) -> dict para Playwright, o None."""
-    p = os.environ.get("PROXY_URL", "").strip()
-    if not p:
-        return None
-    from urllib.parse import urlparse, unquote
-    u = urlparse(p)
-    if not u.hostname:
-        return None
-    cfg = {"server": f"{u.scheme or 'http'}://{u.hostname}:{u.port or 80}"}
-    if u.username:
-        cfg["username"] = unquote(u.username)
-        cfg["password"] = unquote(u.password or "")
-    return cfg
+BLOQUEO_ML = ["hubo un error accediendo", "error accediendo a esta pagina", "error accediendo a esta página",
+              "verifica que eres humano", "no eres un robot", "access denied"]
 
 
-def _ahorrar_datos(page):
-    """Con proxy de pago se cobra por GB: no bajar imágenes, video ni fuentes."""
+def _bloqueada(page):
     try:
-        page.route("**/*", lambda route: route.abort()
-                   if route.request.resource_type in ("image", "media", "font") else route.continue_())
+        t = page.inner_text("body")[:400].lower()
     except Exception:
-        pass
+        return False
+    return any(x in t for x in BLOQUEO_ML)
 
 
 def scrape_pagina(page, pagina):
@@ -334,6 +322,10 @@ def scrape_pagina(page, pagina):
             for it in (items or []): it["es_flash"] = True
         count = len(items or [])
         logger.info(f"[PW] {pagina['nombre']}: {count}")
+        if count == 0 and _bloqueada(page):
+            _DIAG["txt"] = "ML mostró su pantalla de error/bloqueo (IP o huella del navegador)"
+            logger.warning(f"[PW] BLOQUEADO por ML en {pagina['nombre']}")
+            return None
         if count == 0:                       # dejar pistas de POR QUÉ no salió nada (¿bloqueo? ¿cambió el diseño?)
             try:
                 txt = page.inner_text("body")[:160].replace("\n", " ")
@@ -646,26 +638,21 @@ def main():
 
     todos = []
     total_scrapeado = 0
-    intentos = [(None, PAGINAS)]
-    if _proxy_cfg():                                   # si hay proxy y sin él no salió nada, reintenta con él
-        intentos.append((_proxy_cfg(), PAGINAS[:4]))
+    intentos = [(None, PAGINAS), (None, PAGINAS)]      # 2 directos (cada bloqueo se detecta en ~20 s)
+    if NAV.proxy_cfg():
+        intentos.append((NAV.proxy_cfg(), PAGINAS))      # y, si hay proxy, un tercero por el proxy
     with sync_playwright() as pw:
         for n_int, (proxy, paginas_run) in enumerate(intentos):
-            if n_int == 1 and total_scrapeado > 0:
+            if total_scrapeado > 0:
                 break
-            if n_int == 1:
-                logger.warning("[PW] 0 items directo: reintentando con proxy")
-            kw = dict(headless=True, args=["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage", "--disable-gpu"])
-            if proxy:
-                kw["proxy"] = proxy
-            browser = pw.chromium.launch(**kw)
-            ctx = browser.new_context(user_agent=random.choice(USER_AGENTS), locale="es-MX",
-                timezone_id="America/Mexico_City", viewport={"width": 1366, "height": 768})
-            page = ctx.new_page()
-            if proxy:
-                _ahorrar_datos(page)
+            if n_int > 0:
+                logger.warning(f"[PW] intento {n_int + 1}/{len(intentos)}{' con proxy' if proxy else ''}")
+                time.sleep(random.uniform(8, 20))
+            browser, page = NAV.lanzar(pw, proxy=proxy)
             for pagina in paginas_run:
                 items_pag = scrape_pagina(page, pagina)
+                if items_pag is None:                    # ML nos bloqueó: no gastar tiempo en las otras páginas
+                    break
                 for prod_raw in items_pag:
                     it = procesar(prod_raw, pagina_es_flash=pagina.get("es_flash", False))
                     if it: todos.append(it)
