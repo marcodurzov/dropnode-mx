@@ -48,6 +48,7 @@ ciclo_marcas_d   = _imp("scraper_tiendas",   "ejecutar_ciclo_marcas_directo")
 ciclo_palacio_a  = _imp("scraper_api",       "ejecutar_ciclo_palacio_api")
 ciclo_petco_a    = _imp("scraper_api",       "ejecutar_ciclo_petco_api")
 ciclo_ml_deals   = _imp("scraper_api",       "ejecutar_ciclo_ml_deals")
+ciclo_ml_catalogo = _imp("scraper_ml_catalogo", "ejecutar_ciclo_ml_catalogo")
 ciclo_sams_a     = _imp("scraper_api",       "ejecutar_ciclo_sams_api")
 ciclo_elektra    = _imp("scraper_elektra",   "ejecutar_ciclo_elektra")
 ciclo_bodega     = _imp("scraper_bodega",    "ejecutar_ciclo_bodega")
@@ -196,7 +197,7 @@ def _multi(clave):
 
 
 SCRAPERS = [
-    ("ML Deals API",   ciclo_ml_deals, 4),
+    ("ML Catálogo",   ciclo_ml_catalogo, 5),
     ("Temporada ML",   ciclo_temporada, 3),
     ("Walmart",        _con_respaldo(ciclo_walmart, "walmart"), 3),
     ("Liverpool",      _con_respaldo(ciclo_liverpool, "liverpool"), 3),
@@ -215,7 +216,6 @@ SCRAPERS = [
     ("Marcas Directo", ciclo_marcas_d, 1),
     ("TikTok Trend",   ciclo_tiktok, 1),
     ("SHEIN",          ciclo_shein, 1),
-    ("AliExpress",     ciclo_aliexpress, 1),
 ]
 def _armar_pool():
     """Fuentes con 3+ corridas y 0 con productos en 24 h se prueban poco (peso 1);
