@@ -274,7 +274,8 @@ def extraer_vtex(base, sesion):
                 continue
             img = ((it.get("images") or [{}])[0]).get("imageUrl", "")
             res.append({"nombre": p.get("productName", ""), "precio": _precio(oferta.get("Price")),
-                        "orig": _precio(oferta.get("ListPrice")), "url": _abs(base, p.get("link", "")),
+                        "orig": max(_precio(oferta.get("ListPrice")), _precio(oferta.get("PriceWithoutDiscount"))),
+                        "url": _abs(base, p.get("link", "")),
                         "thumb": img})
         except Exception:
             continue
@@ -371,20 +372,40 @@ def _categoria(nombre):
     return ("Ofertas", "🛍️")
 
 
-def _a_item(clave, r, estrategia=""):
+def _limpiar_nombre(n):
+    n = re.sub(r"\s+", " ", str(n or "")).strip()
+    n = re.sub(r"\s*\$\s?[\d.,]+(\s*(MXN|mxn))?", " ", n)            # "…Urban Escape $943.11" -> sin precio
+    return re.sub(r"\s+", " ", n).strip(" -–|·")
+
+
+def _a_item(clave, r, estrategia="", razones=None):
     nombre_t, emoji_t, base, _, _ = TIENDAS[clave]
-    nombre = re.sub(r"\s+", " ", str(r.get("nombre", ""))).strip()
+
+    def no(motivo):
+        if razones is not None:
+            razones[motivo] = razones.get(motivo, 0) + 1
+        return None
+
+    nombre = _limpiar_nombre(r.get("nombre", ""))
     precio, orig = float(r.get("precio") or 0), float(r.get("orig") or 0)
     url = r.get("url") or ""
-    if not nombre or precio < MIN_PRECIO or orig <= precio or not url.startswith("http"):
-        return None
+    if not nombre or len(nombre) < 5:
+        return no("sin_nombre")
+    if not url.startswith("http"):
+        return no("sin_url")
+    if precio < MIN_PRECIO:
+        return no("precio_bajo")
+    if orig <= precio:
+        return no("sin_precio_tachado")
     desc = (orig - precio) / orig
     tope = MAX_DESC_HTML if estrategia == "html" else MAX_DESC
-    if desc < MIN_DESC or desc > tope:
-        return None
+    if desc < MIN_DESC:
+        return no("descuento_menor_15")
+    if desc > tope:
+        return no("descuento_sospechoso")
     ratio = orig / precio
     if 9.5 <= ratio <= 10.5:                       # típico error: precio por unidad vs total
-        return None
+        return no("relacion_10_a_1")
     cat_n, cat_e = _categoria(nombre)
     return {"tienda": clave, "nombre": nombre[:90], "precio_actual": precio, "precio_original": orig,
             "descuento": desc, "sku": hashlib.md5(url.split("?")[0].encode()).hexdigest()[:14],
@@ -470,8 +491,21 @@ def scrapear_tienda(clave, diag=None, max_paginas=4, muestras_dir=None):
         detalle["estrategias"]["vtex"] = len(got) if not nota else nota
         crudos += [("vtex", g) for g in got]
 
-    # Si la página carga pero no trae productos en el HTML crudo: renderizar con JavaScript
-    if not crudos and paginas:
+    razones = {}
+
+    def _filtrar(lista):
+        out, vistos = [], set()
+        for est, r in lista:
+            it = _a_item(clave, r, est, razones)
+            if it and it["sku"] not in vistos:
+                vistos.add(it["sku"])
+                out.append(it)
+        return out
+
+    items = _filtrar(crudos)
+
+    # Si la página carga pero no sale ningún producto válido del HTML crudo: renderizar con JavaScript
+    if not items and paginas:
         rend = []
         for u, _ in paginas[:2]:
             h2 = _renderizar(u)
@@ -481,22 +515,19 @@ def scrapear_tienda(clave, diag=None, max_paginas=4, muestras_dir=None):
                     _guardar_muestra(muestras_dir, f"{clave}_renderizado.html", h2)
         detalle["renderizadas"] = len(rend)
         d2 = {"estrategias": {}}
-        crudos = _estrategias(rend, base, d2, clave)
+        crudos2 = _estrategias(rend, base, d2, clave)
         detalle["estrategias_render"] = d2["estrategias"]
+        crudos += crudos2
+        items = _filtrar(crudos2)
 
-    items, vistos = [], set()
-    for est, r in crudos:
-        it = _a_item(clave, r, est)
-        if it and it["sku"] not in vistos:
-            vistos.add(it["sku"])
-            items.append(it)
     items.sort(key=lambda x: x["descuento"], reverse=True)
     detalle["items"] = len(items)
     detalle["candidatos_crudos"] = len(crudos)
+    detalle["descartes"] = razones
     if diag is not None:
         diag.update(detalle)
         diag["muestra"] = [(i["nombre"][:40], i["precio_actual"], i["precio_original"]) for i in items[:2]]
-    logger.info(f"[MULTI {clave}] páginas={len(paginas)} items={len(items)} {detalle['estrategias']}")
+    logger.info(f"[MULTI {clave}] páginas={len(paginas)} items={len(items)} {detalle['estrategias']} descartes={razones}")
     return items[:15]
 
 
