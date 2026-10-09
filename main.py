@@ -197,8 +197,6 @@ def _multi(clave):
 
 
 SCRAPERS = [
-    ("ML Catálogo",   ciclo_ml_catalogo, 5),
-    ("Temporada ML",   ciclo_temporada, 3),
     ("Walmart",        _con_respaldo(ciclo_walmart, "walmart"), 3),
     ("Liverpool",      _con_respaldo(ciclo_liverpool, "liverpool"), 3),
     ("Amazon",         _con_respaldo(ciclo_amazon, "amazon"), 3),
@@ -210,11 +208,9 @@ SCRAPERS = [
     ("Costco",         _con_respaldo(ciclo_costco, "costco"), 2),
     ("Sears",          _con_respaldo(ciclo_sears, "sears"), 2),
     ("Coppel",         _con_respaldo(ciclo_coppel, "coppel"), 2),
-    ("ML Marcas",      ciclo_marcas, 2),
     ("Petco API",      ciclo_petco_a, 1),
     ("Inditex",        ciclo_inditex, 1),
     ("Marcas Directo", ciclo_marcas_d, 1),
-    ("TikTok Trend",   ciclo_tiktok, 1),
     ("SHEIN",          ciclo_shein, 1),
 ]
 def _armar_pool():
