@@ -23,10 +23,9 @@ VENTAJA_VIP_MIN  = 60         # lo que pasa del VIP al free sale 60 min después
 # ── Qué es exclusivo VIP ──
 VIP_EXCL_DESCUENTO = 0.35
 VIP_EXCL_SCORE     = 7
-# False = las alertas 🔴 exclusivas NUNCA pasan al free como alerta completa
-# (solo aparecen, pasado el tiempo, en el resumen del día). Cambiar a True si
-# quieres que también pasen al free 60 min después.
-EXCLUSIVOS_PASAN_AL_FREE = False
+# Al canal free pasa (1 hora después) todo EXCEPTO los errores de precio (score >= FREE_BLOQUEA_SCORE),
+# que se quedan solo en el VIP y aparecen en el resumen del día pasada 1 hora.
+FREE_BLOQUEA_SCORE = 8
 
 FREE_MAX_POR_DIA   = 24       # tope diario de alertas en el canal free
 FREE_MAX_POR_CORRIDA = 2      # tope por corrida (cada 15 min)
@@ -67,9 +66,7 @@ def es_exclusivo(descuento, score, es_flash=False):
 
 
 def puede_pasar_al_free(descuento, score, es_flash=False):
-    if es_exclusivo(descuento, score, es_flash):
-        return EXCLUSIVOS_PASAN_AL_FREE
-    return True
+    return score < FREE_BLOQUEA_SCORE
 
 
 def nivel_emoji(descuento, score, es_flash=False):
