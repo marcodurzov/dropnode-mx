@@ -127,7 +127,7 @@ def resumen_free():
         m += f"➕ <b>{len(vip) - len(top)} ofertas más</b> se publicaron hoy en el Canal VIP.\n"
     if ahorro > 500:
         m += f"💰 Ahorro acumulado hoy en el VIP: <b>~{_mxn(ahorro)} MXN</b>\n"
-    m += "\n<i>Los 🔴 van al VIP primero y nunca se publican completas aquí.</i>\n"
+    m += "\n<i>Las 🔴 llegan al VIP primero; los errores de precio (🚨) se quedan solo allá.</i>\n"
     m += "<i>El VIP arranca desde las 6:30 AM y, si aparece un error de precio, también de madrugada.</i>"
     return bool(E.tg_send(E.cfg_int("CHANNEL_FREE_ID"), m, boton=BTN_VIP()))
 
