@@ -1,4 +1,4 @@
-[HANDOFF.md](https://github.com/user-attachments/files/33214301/HANDOFF.md)
+[HANDOFF.md](https://github.com/user-attachments/files/33258038/HANDOFF.md)
 # DropNode MX — HANDOFF (pega este archivo al inicio de una conversación nueva)
 
 > Mantén este archivo en la raíz del repo `marcodurzov/dropnode-mx` y en los archivos del Proyecto de Claude.
@@ -31,10 +31,11 @@ Regla no negociable: NUNCA mencionar automatización en público. Todo es "el eq
 TELEGRAM_TOKEN, CHANNEL_FREE_ID, CHANNEL_VIP_ID, GROUP_ID, SUPABASE_URL, SUPABASE_KEY, LAUNCHPASS_LINK, ML_AFFILIATE_ID, AMAZON_TAG, MAKE_WEBHOOK_URL
 Nuevos (opcionales pero recomendados): ML_APP_ID, ML_SECRET (token de la API de ML), ADMIN_CHAT_ID (tu ID; escríbele /id al bot en privado), PROXY_URL (anyIP).
 
-## Estado real de las fuentes (diagnóstico del 02-oct-2026, desde GitHub Actions)
+## Estado real de las fuentes (diagnóstico del 08-oct-2026, desde GitHub Actions)
 | Fuente | Resultado | Nota |
 |---|---|---|
-| API de búsqueda de Mercado Libre | 403 aun con token de aplicación | No depender de ella. ML se lee con Playwright (`github_scraper_ml.py`), incluyendo temporada y peticiones. |
+| API de búsqueda de Mercado Libre | 403 aun con token de aplicación | `/sites/MLM/search` no sirve. Sí responden 200 con token: `products/search`, `highlights`, `trends`, `categories`. Ruta nueva: `scraper_ml_catalogo.py` (highlights -> producto -> /items). |
+| ML con navegador (Playwright) | 8-oct-2026: 0 productos en 24 h (¿bloqueo o cambio de diseño?) | Ver sección 2c del diagnóstico; con proxy reintenta solo. |
 | Sam's | carga y saca candidatos | Había falsos positivos (precio por unidad); ya hay filtros de sanidad en `scraper_multi.py`. |
 | Palacio, Elektra, Walmart, Bodega | bloqueadas (403 / reto anti-bot) | Requieren proxy residencial (`PROXY_URL`); aun así no está garantizado. |
 | Coppel | timeout (descarta IPs de datacenter) | Igual: proxy. |
