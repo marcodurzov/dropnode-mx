@@ -1,5 +1,5 @@
 # =============================================================
-# DROPNODE MX — diagnostico.py  (v2.0)
+# DROPNODE MX — diagnostico.py  (v3.0)
 # Se corre MANUAL desde GitHub: Actions -> "DropNode Diagnóstico" -> Run workflow.
 # Dice, con datos reales desde los servidores de GitHub:
 #   1) ¿Supabase responde?
@@ -67,6 +67,59 @@ if ids_item:
     except Exception as e:
         out(f"  items multiget         ERROR {str(e)[:80]}")
 
+out("\n== 2b) RUTA DE CATÁLOGO DE ML (sin navegador) ==")
+try:
+    ids_i, ids_p = ml_api.highlights_ids("MLM1051")
+    out(f"  highlights celulares: {len(ids_i)} items directos + {len(ids_p)} productos de catálogo")
+    cuerpos = ml_api.highlights_items("MLM1051", max_productos=6)
+    con_desc = [b for b in cuerpos if float(b.get("original_price") or 0) > float(b.get("price") or 0)]
+    out(f"  items leídos con /items: {len(cuerpos)} · con precio tachado (descuento): {len(con_desc)}")
+    for b in (con_desc or cuerpos)[:2]:
+        out(f"   ej: {str(b.get('title'))[:45]} · ${b.get('price')} (antes {b.get('original_price')}) · {str(b.get('permalink'))[:50]}")
+    bus = ml_api.catalogo_buscar("audifonos", max_productos=4)
+    out(f"  búsqueda por catálogo 'audifonos': {len(bus)} items")
+    import scraper_ml_catalogo as _C
+    n = len(_C.ejecutar_ciclo_ml_catalogo())
+    out(f"  ciclo completo ML Catálogo: {n} ofertas con descuento real  <-- si es 0, ML no devuelve precio tachado por esta vía")
+except Exception as _e:
+    out(f"  ERROR: {str(_e)[:160]}")
+
+out("\n== 2c) MERCADO LIBRE CON NAVEGADOR (el motor de las alertas) ==")
+try:
+    import re as _re
+    from playwright.sync_api import sync_playwright
+    _src = open("github_scraper_ml.py", encoding="utf-8").read()
+    _js = _src.split('JS_EXTRACT = r"""')[1].split('"""')[0]
+    _urls = [("ofertas", "https://www.mercadolibre.com.mx/ofertas"),
+             ("solo-hoy", "https://www.mercadolibre.com.mx/ofertas/solo-hoy"),
+             ("listado", "https://listado.mercadolibre.com.mx/inflable-alberca")]
+    os.makedirs(MUESTRAS, exist_ok=True)
+    with sync_playwright() as pw:
+        for etiqueta, u in _urls:
+            b = pw.chromium.launch(headless=True, args=["--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu"])
+            ctx = b.new_context(locale="es-MX", timezone_id="America/Mexico_City", viewport={"width": 1366, "height": 768})
+            pg = ctx.new_page()
+            try:
+                pg.goto(u, wait_until="domcontentloaded", timeout=30000)
+                pg.wait_for_timeout(5000)
+                cuenta = {s: pg.locator(s).count() for s in [".poly-card", ".andes-card", "[class*='ui-search-result']", "li[class*='item']"]}
+                prods = pg.evaluate(_js)
+                texto = pg.inner_text("body")[:140].replace("\n", " ")
+                out(f"  [{etiqueta}] items extraídos={len(prods or [])} selectores={cuenta}")
+                out(f"      url final: {pg.url[:90]}")
+                out(f"      título: {pg.title()[:80]}")
+                out(f"      texto: {texto}")
+                try:
+                    pg.screenshot(path=f"{MUESTRAS}/ml_{etiqueta}.png")
+                    open(f"{MUESTRAS}/ml_{etiqueta}.html", "w", encoding="utf-8").write(pg.content()[:900000])
+                except Exception:
+                    pass
+            except Exception as _e:
+                out(f"  [{etiqueta}] ERROR {str(_e)[:120]}")
+            b.close()
+except Exception as _e:
+    out(f"  (no se pudo abrir el navegador: {str(_e)[:120]})")
+
 out("\n== 3) TIENDAS (motor multi, con render JS si el HTML crudo no trae productos) ==")
 resumen = []
 for clave in M.TIENDAS:
@@ -81,6 +134,8 @@ for clave in M.TIENDAS:
     out(f"\n[{clave}] páginas ok={ok}/{len(pag)} bloqueadas={bloq} items={len(items)} candidatos={d.get('candidatos_crudos')} estrategias={d.get('estrategias')}")
     if "estrategias_render" in d:
         out(f"   render JS: páginas={d.get('renderizadas')} estrategias={d.get('estrategias_render')}")
+    if d.get("descartes"):
+        out(f"   descartes (por qué no pasaron los filtros): {d.get('descartes')}")
     for p in pag[:4]:
         out(f"   {p['status']} {p['bytes']:>7}b {p['nota'] or 'ok':<14} {p['url'][:70]}")
     for m in d.get("muestra", []):
@@ -91,7 +146,7 @@ out("\n== 4) SCRAPERS DEDICADOS ==")
 dedic = [("scraper_walmart", "ejecutar_ciclo_walmart"), ("scraper_liverpool", "ejecutar_ciclo_liverpool"),
          ("scraper_coppel", "ejecutar_ciclo_coppel"), ("scraper_amazon", "ejecutar_ciclo_amazon"),
          ("scraper_elektra", "ejecutar_ciclo_elektra"), ("scraper_bodega", "ejecutar_ciclo_bodega"),
-         ("scraper_api", "ejecutar_ciclo_ml_deals"), ("scraper_temporada", "ejecutar_ciclo_temporada")]
+         ("scraper_ml_catalogo", "ejecutar_ciclo_ml_catalogo"), ("scraper_temporada", "ejecutar_ciclo_temporada")]
 for mod, fn in dedic:
     try:
         n = len(getattr(importlib.import_module(mod), fn)() or [])
