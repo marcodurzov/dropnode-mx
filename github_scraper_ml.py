@@ -296,6 +296,34 @@ JS_EXTRACT = r"""
 }
 """
 
+_DIAG = {"txt": ""}
+
+
+def _proxy_cfg():
+    """PROXY_URL (http://usuario:clave@host:puerto) -> dict para Playwright, o None."""
+    p = os.environ.get("PROXY_URL", "").strip()
+    if not p:
+        return None
+    from urllib.parse import urlparse, unquote
+    u = urlparse(p)
+    if not u.hostname:
+        return None
+    cfg = {"server": f"{u.scheme or 'http'}://{u.hostname}:{u.port or 80}"}
+    if u.username:
+        cfg["username"] = unquote(u.username)
+        cfg["password"] = unquote(u.password or "")
+    return cfg
+
+
+def _ahorrar_datos(page):
+    """Con proxy de pago se cobra por GB: no bajar imágenes, video ni fuentes."""
+    try:
+        page.route("**/*", lambda route: route.abort()
+                   if route.request.resource_type in ("image", "media", "font") else route.continue_())
+    except Exception:
+        pass
+
+
 def scrape_pagina(page, pagina):
     try:
         logger.info("[PW] " + pagina["nombre"])
@@ -306,9 +334,16 @@ def scrape_pagina(page, pagina):
             for it in (items or []): it["es_flash"] = True
         count = len(items or [])
         logger.info(f"[PW] {pagina['nombre']}: {count}")
+        if count == 0:                       # dejar pistas de POR QUÉ no salió nada (¿bloqueo? ¿cambió el diseño?)
+            try:
+                txt = page.inner_text("body")[:160].replace("\n", " ")
+                _DIAG["txt"] = f"url={page.url[:90]} | título={page.title()[:70]} | texto={txt}"
+                logger.warning(f"[PW] 0 items en {pagina['nombre']} · {_DIAG['txt']}")
+            except Exception:
+                pass
         return items or []
     except Exception as e:
-        logger.error("[PW] " + str(e)); return []
+        logger.error("[PW] " + str(e)); _DIAG["txt"] = str(e)[:150]; return []
 
 # ── Fallback: ML API cuando Playwright devuelve 0 ──
 def ml_api_fallback(limit=50):
@@ -611,20 +646,32 @@ def main():
 
     todos = []
     total_scrapeado = 0
+    intentos = [(None, PAGINAS)]
+    if _proxy_cfg():                                   # si hay proxy y sin él no salió nada, reintenta con él
+        intentos.append((_proxy_cfg(), PAGINAS[:4]))
     with sync_playwright() as pw:
-        browser = pw.chromium.launch(headless=True,
-            args=["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage", "--disable-gpu"])
-        ctx = browser.new_context(user_agent=random.choice(USER_AGENTS), locale="es-MX",
-            timezone_id="America/Mexico_City", viewport={"width": 1366, "height": 768})
-        page = ctx.new_page()
-        for pagina in PAGINAS:
-            items_pag = scrape_pagina(page, pagina)
-            for prod_raw in items_pag:
-                it = procesar(prod_raw, pagina_es_flash=pagina.get("es_flash", False))
-                if it: todos.append(it)
-            total_scrapeado += len(items_pag)
-            time.sleep(random.uniform(2, 4))
-        browser.close()
+        for n_int, (proxy, paginas_run) in enumerate(intentos):
+            if n_int == 1 and total_scrapeado > 0:
+                break
+            if n_int == 1:
+                logger.warning("[PW] 0 items directo: reintentando con proxy")
+            kw = dict(headless=True, args=["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage", "--disable-gpu"])
+            if proxy:
+                kw["proxy"] = proxy
+            browser = pw.chromium.launch(**kw)
+            ctx = browser.new_context(user_agent=random.choice(USER_AGENTS), locale="es-MX",
+                timezone_id="America/Mexico_City", viewport={"width": 1366, "height": 768})
+            page = ctx.new_page()
+            if proxy:
+                _ahorrar_datos(page)
+            for pagina in paginas_run:
+                items_pag = scrape_pagina(page, pagina)
+                for prod_raw in items_pag:
+                    it = procesar(prod_raw, pagina_es_flash=pagina.get("es_flash", False))
+                    if it: todos.append(it)
+                total_scrapeado += len(items_pag)
+                time.sleep(random.uniform(2, 4))
+            browser.close()
 
     if total_scrapeado < 10:
         logger.warning(f"[GITHUB] Solo {total_scrapeado} items en Playwright — activando API fallback")
@@ -632,6 +679,9 @@ def main():
             it = procesar(prod_raw)
             if it: todos.append(it)
     E.log_fuente("ML Playwright", total_scrapeado, "" if total_scrapeado else "0 items")
+    if total_scrapeado == 0:
+        E.admin_msg("⚠️ DropNode: el navegador no pudo leer Mercado Libre (0 productos).\n" + (_DIAG["txt"] or "sin detalle"),
+                    clave=f"ml_cero:{hoy}:{hora // 3}")
     for it in todos:
         try:
             if it and it["descuento"] >= 0.20:
