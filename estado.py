@@ -10,7 +10,7 @@
 #   - Salud de fuentes (qué scraper está muerto)
 # Si la base de datos no responde, TODO degrada con gracia (no crashea).
 # =============================================================
-import os, logging, socket, time, html, hashlib
+import os, re, logging, socket, time, html, hashlib
 from datetime import datetime, timedelta
 from urllib.parse import urlparse
 
@@ -212,6 +212,10 @@ def link_afiliado(url, sku=""):
             return f"{base}?matt_tool={aff}" if aff else base
         if "amazon.com" in url:
             tag = cfg("AMAZON_TAG")
+            m = re.search(r"/(?:dp|gp/product)/([A-Z0-9]{10})", url)
+            if m:                                   # enlace corto y limpio: sin parámetros de rastreo
+                host = re.search(r"https?://([^/]+)", url)
+                url = f"https://{host.group(1) if host else 'www.amazon.com.mx'}/dp/{m.group(1)}"
             if tag and "tag=" not in url:
                 return url + ("&" if "?" in url else "?") + f"tag={tag}"
     except Exception:
