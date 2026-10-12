@@ -62,7 +62,7 @@ def lanzar(pw, proxy=None, ahorrar_datos=False):
     if ahorrar_datos or proxy:
         try:
             page.route("**/*", lambda route: route.abort()
-                       if route.request.resource_type in ("image", "media", "font") else route.continue_())
+                       if route.request.resource_type in ("image", "media", "font", "stylesheet") else route.continue_())
         except Exception:
             pass
     return browser, page
