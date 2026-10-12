@@ -301,11 +301,14 @@ _DIAG = {"txt": ""}
 
 
 BLOQUEO_ML = ["hubo un error accediendo", "error accediendo a esta pagina", "error accediendo a esta página",
-              "verifica que eres humano", "no eres un robot", "access denied"]
+              "verifica que eres humano", "no eres un robot", "access denied",
+              "para continuar, ingresa a tu cuenta", "ingresa a tu cuenta"]
 
 
 def _bloqueada(page):
     try:
+        if "account-verification" in page.url or "/login" in page.url:
+            return True
         t = page.inner_text("body")[:400].lower()
     except Exception:
         return False
@@ -638,9 +641,12 @@ def main():
 
     todos = []
     total_scrapeado = 0
-    intentos = [(None, PAGINAS), (None, PAGINAS)]      # 2 directos (cada bloqueo se detecta en ~20 s)
+    # Sin proxy: 2 intentos directos. Con proxy: 1 directo (barato) y luego proxy con pocas páginas (se paga por GB).
+    PAGINAS_PROXY = [PAGINAS_FLASH[0], PAGINAS_FLASH[2], PAGINAS_BASE[0], PAGINAS_BASE[1]]
     if NAV.proxy_cfg():
-        intentos.append((NAV.proxy_cfg(), PAGINAS))      # y, si hay proxy, un tercero por el proxy
+        intentos = [(None, PAGINAS), (NAV.proxy_cfg(), PAGINAS_PROXY)]
+    else:
+        intentos = [(None, PAGINAS), (None, PAGINAS)]
     with sync_playwright() as pw:
         for n_int, (proxy, paginas_run) in enumerate(intentos):
             if total_scrapeado > 0:
