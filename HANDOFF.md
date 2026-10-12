@@ -1,4 +1,4 @@
-[HANDOFF.md](https://github.com/user-attachments/files/33268099/HANDOFF.md)
+[HANDOFF.md](https://github.com/user-attachments/files/33346928/HANDOFF.md)
 # DropNode MX — HANDOFF (pega este archivo al inicio de una conversación nueva)
 
 > Mantén este archivo en la raíz del repo `marcodurzov/dropnode-mx` y en los archivos del Proyecto de Claude.
@@ -35,9 +35,9 @@ Nuevos (opcionales pero recomendados): ML_APP_ID, ML_SECRET (token de la API de 
 | Fuente | Resultado | Nota |
 |---|---|---|
 | API de búsqueda de Mercado Libre | 403 aun con token de aplicación | `/sites/MLM/search` no sirve. Sí responden 200 con token: `products/search`, `highlights`, `trends`, `categories`. Ruta nueva: `scraper_ml_catalogo.py` (highlights -> producto -> /items). |
-| ML con navegador (Playwright) | Intermitente: ML muestra "Hubo un error accediendo a esta pagina" a IPs de GitHub (1 de 6 corridas sacó productos) | v4.1: huella de navegador realista (`navegador.py`), 2 intentos directos + 1 con proxy, corre cada 15 min. Solución estable: proxy residencial. |
+| ML con navegador (Playwright) | 10-oct-2026: ML redirige a `/gz/account-verification` ("ingresa a tu cuenta") a las IPs de GitHub; antes mostraba "Hubo un error accediendo" (1 de 6 corridas sacaba productos) | v4.1: huella de navegador realista (`navegador.py`), 2 intentos directos + 1 con proxy, corre cada 15 min. Solución estable: proxy residencial de pago por GB (PROXY_URL); con proxy solo se cargan 4 páginas y se bloquean imágenes/CSS para gastar poco. |
 | ML API catálogo | `highlights` da ids, pero `/products/{id}` y `/sites/MLM/search` dan 403 | Ruta descartada; se quitaron las fuentes que dependían de ella. |
-| Sam's, Costco | cargan, pero los "descuentos" eran mensualidades (precio/4) | v4.1 rechaza razones ≈ 4, 6, 9, 10, 12, 18, 24 en la heurística HTML; puede quedar en 0 hasta afinar selectores con las muestras. |
+| Sam's, Costco, Liverpool, HEB | los "descuentos" eran mensualidades o montos de ahorro (Costco muestra "-$9,000") | v4.2: la heurística HTML solo acepta un producto si la tarjeta muestra un % de descuento que coincide con los precios; rechaza razones ≈ 4, 6, 9, 10, 12, 18, 24. Puede quedar en 0 hasta afinar selectores con las muestras. |
 | Palacio, Elektra, Walmart, Bodega | bloqueadas (403 / reto anti-bot) | Requieren proxy residencial (`PROXY_URL`); aun así no está garantizado. |
 | Coppel | timeout (descarta IPs de datacenter) | Igual: proxy. |
 | Liverpool | `shoppingapi.liverpool.com.mx` ya no existe; la web carga | Falta afinar selectores con las muestras HTML. |
