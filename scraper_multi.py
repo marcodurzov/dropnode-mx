@@ -314,7 +314,11 @@ def extraer_html(soup, base):
                 precios.append(v)
         if not precios:
             continue
-        precio = max(precios)        # el precio real es el más alto debajo del tachado; los menores suelen ser mensualidades
+        pcts = [int(x) for x in re.findall(r"(\d{1,2})\s*%", nodo.get_text(" ", strip=True)) if 5 <= int(x) <= 90]
+        if pcts:      # el precio correcto es el que coincide con el % de descuento que muestra la tarjeta
+            precio = min(precios, key=lambda p: min(abs((orig - p) / orig * 100 - q) for q in pcts))
+        else:
+            precio = max(precios)
         a = nodo.find("a", href=True)
         img = nodo.find("img")
         nombre = ""
@@ -331,7 +335,7 @@ def extraer_html(soup, base):
         if len(nombre) > 4 and url and clave not in vistos:
             vistos.add(clave)
             thumb = (img.get("src") or img.get("data-src") or "") if img else ""
-            res.append({"nombre": nombre, "precio": precio, "orig": orig, "url": url, "thumb": thumb})
+            res.append({"nombre": nombre, "precio": precio, "orig": orig, "url": url, "thumb": thumb, "pcts": pcts})
     return res
 
 
@@ -398,6 +402,12 @@ def _a_item(clave, r, estrategia="", razones=None):
         return no("sin_precio_tachado")
     desc = (orig - precio) / orig
     tope = MAX_DESC_HTML if estrategia == "html" else MAX_DESC
+    if estrategia == "html":                        # la heurística HTML exige evidencia: un % visible que cuadre con los precios
+        pcts = r.get("pcts") or []
+        if not pcts:
+            return no("sin_porcentaje_visible")
+        if not any(abs(q - desc * 100) <= 4 for q in pcts):
+            return no("porcentaje_no_coincide")
     if desc < MIN_DESC:
         return no("descuento_menor_15")
     if desc > tope:
