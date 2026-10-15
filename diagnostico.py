@@ -119,6 +119,29 @@ try:
 except Exception as _e:
     out(f"  (no se pudo abrir el navegador: {str(_e)[:120]})")
 
+out("\n== 2d) ML POR HTTP SIMPLE (sin navegador) ==")
+try:
+    import scraper_ml_http as MH
+    raws, info = MH.obtener_raw(max_paginas=2, usar_proxy=False)
+    out(f"  directo: tarjetas={len(raws)} info={info}")
+    con_desc = [r for r in raws if r.get("original_price")]
+    out(f"  con precio anterior: {len(con_desc)}")
+    for r in con_desc[:3]:
+        out(f"   ej: {r['title'][:45]} · ${r['price']} (antes ${r['original_price']}) · {r['permalink'][:55]}")
+    if os.environ.get("PROXY_URL", "").strip():
+        raws2, info2 = MH.obtener_raw(max_paginas=2, solo_proxy=True)
+        out(f"  por proxy: tarjetas={len(raws2)} info={info2}")
+except Exception as _e:
+    out(f"  ERROR: {str(_e)[:160]}")
+
+out("\n== 2e) NAVEGADOR SIGILOSO (Scrapling, prueba opcional) ==")
+try:
+    from scrapling.fetchers import StealthyFetcher
+    _p = StealthyFetcher.fetch("https://www.mercadolibre.com.mx/ofertas", headless=True, network_idle=True, google_search=True)
+    out(f"  status={getattr(_p, 'status', None)} tarjetas .poly-card={len(_p.css('.poly-card'))} url={str(getattr(_p, 'url', ''))[:90]}")
+except Exception as _e:
+    out(f"  no disponible: {str(_e)[:120]}")
+
 out("\n== 3) TIENDAS (motor multi, con render JS si el HTML crudo no trae productos) ==")
 resumen = []
 for clave in M.TIENDAS:
