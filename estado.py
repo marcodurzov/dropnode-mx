@@ -138,6 +138,18 @@ def reclamar_evento(clave, detalle="", fallback=True):
     return fallback
 
 
+def liberar_evento(clave):
+    """Borra el candado para que la tarea se reintente en la próxima corrida (p. ej. si Telegram falló)."""
+    _eventos_mem.discard(clave)
+    db = get_db()
+    if not db:
+        return
+    try:
+        db.table("eventos_enviados").delete().eq("clave", clave).execute()
+    except Exception:
+        pass
+
+
 def evento_hecho(clave):
     if clave in _eventos_mem:
         return True
@@ -197,6 +209,39 @@ def admin_msg(texto, clave=None):
     if clave and not reclamar_evento(clave, fallback=False):
         return None
     return tg_send(ADMIN_CHAT_ID, texto)
+
+
+# ─────────────────────────────────────────────
+# Filtro de basura: accesorios baratos que no valen una alerta
+# ─────────────────────────────────────────────
+PRECIO_MIN_ALERTA = 150
+_BASURA = re.compile(
+    r"\b(funda|estuche|case|carcasa)s?\s+(para|de)\s+(celular|iphone|samsung|xiaomi|motorola|tablet|ipad|laptop|airpods|audifonos|audífonos)"
+    r"|\bmica\b|protector(es)? de pantalla|vidrio templado|cristal templado|\bstickers?\b|calcoman[ií]as?"
+    r"|cable (usb|lightning|tipo c|type c|hdmi|aux)\b|\bpilas?\b|\bbaterias? aa", re.I)
+
+
+def es_basura(nombre, precio=0):
+    try:
+        if precio and float(precio) < PRECIO_MIN_ALERTA:
+            return True
+        return bool(_BASURA.search(str(nombre or "")))
+    except Exception:
+        return False
+
+
+_bot = {}
+
+
+def bot_info():
+    """{'id':..., 'username':...} del bot (1 llamada por corrida)."""
+    if not _bot and TELEGRAM_TOKEN:
+        try:
+            r = requests.get(f"{TG}/getMe", timeout=10).json().get("result") or {}
+            _bot.update({"id": r.get("id"), "username": r.get("username") or ""})
+        except Exception:
+            pass
+    return _bot
 
 
 # ─────────────────────────────────────────────
