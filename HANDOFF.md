@@ -1,4 +1,4 @@
-[HANDOFF.md](https://github.com/user-attachments/files/33346928/HANDOFF.md)
+[HANDOFF.md](https://github.com/user-attachments/files/33511106/HANDOFF.md)
 # DropNode MX — HANDOFF (pega este archivo al inicio de una conversación nueva)
 
 > Mantén este archivo en la raíz del repo `marcodurzov/dropnode-mx` y en los archivos del Proyecto de Claude.
@@ -13,17 +13,28 @@ Regla no negociable: NUNCA mencionar automatización en público. Todo es "el eq
 |---|---|---|
 | VIP | 6:30 AM–11:30 PM; de 11:31 PM a 6:29 AM solo score ≥ 8 | `horarios.py` |
 | FREE | 8:00 AM–7:00 PM; nada de 7:01 PM a 7:59 AM | `horarios.py` |
-| VIP → FREE | 60 min, siempre por la cola `cola_free`; solo los errores de precio (score ≥ 8) se quedan únicamente en el VIP | `horarios.py` (`FREE_BLOQUEA_SCORE`) |
+| VIP → FREE | 60 min, siempre por la cola `cola_free`; al free solo pasan ofertas con descuento ≤ 40 % y score < 8; lo demás es solo del VIP. Free: fotos en ~40 % de las alertas; VIP: todas con foto | `horarios.py` (`FREE_MAX_DESCUENTO`, `FREE_BLOQUEA_SCORE`) |
 | Cierre FREE | 6:00–7:00 PM, "Mejores precios de hoy" | `resumenes.py` |
 | Cierre VIP | 11:00–11:30 PM, con ahorro del día/semana/mes/total | `resumenes.py` |
 | Temporadas | calendario por mes (scraper + score + comunidad) | `temporada_calendario.py` |
 | Repeticiones | score < 8: 1 vez por producto cada 14 días; score ≥ 8: hasta 3 veces (mín. 4 h entre ellas); se permite repetir si el precio bajó ≥ 15%; otro vendedor = otro producto | `estado.py` (`REP_*`) |
+
+## Hallazgos clave (oct-2026)
+- GitHub NO respeta `*/15`: en la práctica corre unas 7 veces al día. Por eso todas las tareas programadas usan VENTANAS de horas (con reintento), y se recomienda un disparador externo (cron-job.org -> workflow_dispatch) cada 15 min.
+- Mercado Libre: el navegador de GitHub recibe `/gz/account-verification`. Un repo público (Joharjbe/mercadolibre-mx-scraper) muestra que `/ofertas` se sirve renderizado y se puede leer con HTTP simple (UA de escritorio, pasar por la portada, ritmo lento, parar si hay muro). Implementado en `scraper_ml_http.py`; el navegador queda como respaldo.
+- Costco muestra el AHORRO ("-$9,000"), no el precio; Sam's/Costco usan mensualidades: la heurística HTML exige un % visible que cuadre.
+- Selectores de Liverpool (de CesarYamadaX/Scrapping): `li.m-product__card`, `p.a-card-price`, `p.a-card-discount` -> `extraer_liverpool` en `scraper_multi.py`.
+- Amazon Associates cerró la cuenta `dropnodemx-20` (3 ventas en 180 días no cumplidas, oct-2026): los enlaces de Amazon ya no pagan comisión hasta reaplicar.
+- Comunidad con IA (Claude Haiku) opcional: secret `ANTHROPIC_API_KEY`; voz "el equipo"; si preguntan si es persona, responde que es el asistente virtual del equipo.
+- Comandos del dueño en privado con el bot: `/status`, `/oferta URL precio_ahora precio_antes nombre`.
 
 ## Arquitectura
 - `bot.yml` (cada 15 min) → `main.py`: cola free, 2 fuentes por corrida, lectura/moderación del grupo, programados.
 - `scraper_ml.yml` (cada 30 min) → `github_scraper_ml.py`: Playwright sobre ofertas de ML → VIP directo, free vía cola.
 - `estado.py`: Supabase + candados (`eventos_enviados`) — cada corrida es un proceso nuevo, NADA sobrevive en variables globales.
 - `scraper_multi.py`: motor para tiendas sin API (JSON-LD, JSON embebido, VTEX, HTML). `diagnostico.py` (workflow manual) dice cuál sirve en cada tienda.
+- `scraper_ml_http.py`: ofertas de ML por HTTP (sin navegador); cookies cacheadas entre corridas; proxy solo si hay muro.
+- `contenido.py`: promos de Plata Card/Nu (con aviso de referido), temporada, `/oferta` manual. `ia.py`: respuestas con Claude.
 - `community_manager.py` v5: bienvenida, /reglas, /pedir, moderación, reacciones, niveles, top semanal, miembro del mes, quizzes, métricas.
 - Tablas nuevas: ver `schema.sql`.
 
