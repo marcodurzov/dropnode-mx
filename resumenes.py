@@ -267,3 +267,21 @@ def reporte_salud_admin():
     m += ("<b>Sin productos:</b>\n" + "\n".join(muertas) + "\n\n") if muertas else "Todas las fuentes aportaron productos ✅\n\n"
     m += "<b>Activas:</b>\n" + "\n".join(vivas)
     E.admin_msg(m, clave=f"salud:{H.fecha_mx()}")
+
+
+def texto_status():
+    """Para el comando /status del dueño."""
+    ahora = H.ahora()
+    ini = H.dia_inicio_utc(ahora)
+    vip = E.contar_alertas("vip", datetime.utcnow() - timedelta(hours=24))
+    free = E.contar_alertas("free", datetime.utcnow() - timedelta(hours=24))
+    s = E.salud_fuentes(24)
+    vivas = [f"{n} ({ok}/{c})" for n, (c, ok, tot) in sorted(s.items()) if ok > 0]
+    muertas = [n for n, (c, ok, tot) in sorted(s.items()) if ok == 0]
+    corridas = sum(c for c, ok, tot in s.values())
+    m = f"🩺 <b>Estado — {H.fecha_larga(ahora)} {ahora.strftime('%H:%M')}</b>\n\n"
+    m += f"Alertas últimas 24 h: VIP <b>{vip}</b> · Free <b>{free}</b>\n"
+    m += f"Corridas de fuentes (24 h): <b>{corridas}</b> (esperadas ~190; si son muy pocas GitHub está saltando corridas)\n"
+    m += "Con productos: " + (", ".join(vivas) or "ninguna") + "\n"
+    m += "Sin productos: " + (", ".join(muertas) or "—")
+    return m
