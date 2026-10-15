@@ -27,9 +27,16 @@ jobs:
         with:
           python-version: '3.11'
 
+      - name: Cookies de ML (se conservan entre corridas)
+        uses: actions/cache@v4
+        with:
+          path: .cache
+          key: ml-cookies-scraper-${{ github.run_id }}
+          restore-keys: ml-cookies-scraper-
+
       - name: Install dependencies
         run: |
-          pip install requests supabase==1.2.0 playwright
+          pip install requests supabase==1.2.0 playwright beautifulsoup4
           playwright install chromium
           playwright install-deps chromium
 
