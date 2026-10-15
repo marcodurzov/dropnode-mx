@@ -26,6 +26,8 @@ VIP_EXCL_SCORE     = 7
 # Al canal free pasa (1 hora después) todo EXCEPTO los errores de precio (score >= FREE_BLOQUEA_SCORE),
 # que se quedan solo en el VIP y aparecen en el resumen del día pasada 1 hora.
 FREE_BLOQUEA_SCORE = 8
+# Además: al free solo pasan ofertas con descuento <= 40 %; lo mejor (más descuento) es solo del VIP.
+FREE_MAX_DESCUENTO = 0.40
 
 FREE_MAX_POR_DIA   = 24       # tope diario de alertas en el canal free
 FREE_MAX_POR_CORRIDA = 2      # tope por corrida (cada 15 min)
@@ -66,7 +68,7 @@ def es_exclusivo(descuento, score, es_flash=False):
 
 
 def puede_pasar_al_free(descuento, score, es_flash=False):
-    return score < FREE_BLOQUEA_SCORE
+    return score < FREE_BLOQUEA_SCORE and descuento <= FREE_MAX_DESCUENTO
 
 
 def nivel_emoji(descuento, score, es_flash=False):
