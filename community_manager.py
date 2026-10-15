@@ -22,6 +22,9 @@ import estado as E
 import horarios as H
 import temporada_calendario as T
 import peticiones as P
+import ia
+import contenido
+import resumenes
 
 logger = logging.getLogger(__name__)
 
@@ -456,10 +459,16 @@ def _procesar_msg(msg, admins, posts, ctx):
     user = msg.get("from", {}) or {}
     texto = (msg.get("text") or msg.get("caption") or "").strip()
 
-    if chat.get("type") == "private":                        # /id -> ayuda para configurar ADMIN_CHAT_ID
-        if texto.startswith("/id") or texto.startswith("/start"):
+    if chat.get("type") == "private":
+        es_dueno = bool(E.ADMIN_CHAT_ID) and str(user.get("id")) == str(E.ADMIN_CHAT_ID)
+        if texto.startswith("/id") or texto.startswith("/start"):      # /id -> ayuda para configurar ADMIN_CHAT_ID
             E.tg_send(chat["id"], f"Tu ID de Telegram es <code>{user.get('id')}</code>\n"
-                                  "Guárdalo como secret ADMIN_CHAT_ID en GitHub para recibir alertas privadas.")
+                                  "Guárdalo como secret ADMIN_CHAT_ID en GitHub para recibir alertas privadas.\n\n"
+                                  "Comandos del dueño: /status · /oferta")
+        elif es_dueno and texto.startswith("/status"):
+            E.tg_send(chat["id"], resumenes.texto_status())
+        elif es_dueno and texto.startswith("/oferta"):
+            E.tg_send(chat["id"], contenido.oferta_manual(texto))
         return
     if chat.get("id") != GROUP:
         return
@@ -526,13 +535,23 @@ def _procesar_msg(msg, admins, posts, ctx):
         if reply_tipo in ("peticion", "pregunta_temporada") or P.ventana_activa():
             ctx["peticiones"].append((texto, user, msg["message_id"]))
 
+    # IA: solo si mencionan al bot, le responden, o hacen una pregunta (máx. 3 respuestas por corrida)
+    if ia.disponible() and not clase and not texto.startswith("/"):
+        bot = E.bot_info()
+        uname = (bot.get("username") or "").lower()
+        menciona = bool(uname) and f"@{uname}" in texto.lower()
+        resp_bot = bool(reply) and (((reply.get("from") or {}).get("id") == bot.get("id")) or (reply.get("from") or {}).get("is_bot"))
+        pregunta = "?" in texto and len(texto) >= 15
+        if menciona or resp_bot or pregunta:
+            ctx["ia"].append((texto, user, msg["message_id"]))
+
 
 def procesar_actualizaciones():
     """Lee lo nuevo del grupo, modera, reconoce y registra. Seguro si no hay BD."""
     if not GROUP or not E.TELEGRAM_TOKEN:
         return
     ctx = {"nuevos": [], "filas": [], "respuestas": [], "peticiones": [], "calientes": [], "aportes": {},
-           "aportantes": {}, "fechas": {}, "flood": set(), "reacciones": 0, "moderacion": 0}
+           "aportantes": {}, "fechas": {}, "flood": set(), "reacciones": 0, "moderacion": 0, "ia": []}
     admins, posts = _admins(), _posts_recientes()
     offset, total = None, 0
     for _ in range(5):
@@ -609,6 +628,18 @@ def _cerrar(ctx):
             E.tg_send(GROUP, random.choice(["¡Gracias por compartirlo! 🙌", "Buen aporte 👏 a la comunidad le sirve.",
                                             "Excelente dato, gracias 🔥"]), reply_to=mid)
 
+    # Respuestas con IA (una por persona por hora; no se contesta lo que ya se tomó como petición)
+    ya_pet = {p[2] for p in ctx["peticiones"]}
+    n_ia = 0
+    for texto, user, mid in ctx["ia"]:
+        if n_ia >= 3:
+            break
+        if mid in ya_pet or not E.reclamar_evento(f"ia:{user['id']}:{H.fecha_mx()}:{H.ahora().hour}", fallback=False):
+            continue
+        r = ia.responder(texto, user.get("first_name", ""))
+        if r and E.tg_send(GROUP, r, reply_to=mid):
+            n_ia += 1
+
     # Peticiones -> BD -> búsqueda inmediata -> VIP
     pets = ctx["peticiones"][:5]
     for i, (texto, user, mid) in enumerate(pets):
@@ -668,6 +699,8 @@ def reporte_metricas():
 # Programación
 # ─────────────────────────────────────────────
 def ejecutar_community_manager():
+    """GitHub a veces salta corridas: cada publicación tiene una VENTANA de horas (no una hora exacta)
+    y se reintenta si falla. Cada una sale una sola vez (candado en Supabase)."""
     if not GROUP:
         return
     a = H.ahora()
@@ -679,31 +712,38 @@ def ejecutar_community_manager():
     def prog(cond, clave, fn):
         if cond and _una_vez(clave):
             try:
-                fn()
+                r = fn()
             except Exception as e:
                 logger.error(f"[COMMUNITY] {clave}: {e}", exc_info=True)
+                E.liberar_evento(f"cm:{clave}")
+                return
+            if r is False:
+                E.liberar_evento(f"cm:{clave}")
 
-    prog(h == 9, f"deal:{f}", deal_del_dia)
-    prog(dia == 0 and h == 8, f"metricas:{sem}", reporte_metricas)
-    prog(dia == 0 and h == 10, f"peticion:{sem}", lambda: publicar("peticion", mensaje_peticion()))
-    prog(dia == 0 and h == 11 and dom <= 7, f"miembro_mes:{a.strftime('%Y-%m')}", miembro_del_mes)
-    prog(dia == 0 and h == 14, f"resumen_pet:{sem}", _resumen_peticiones)
-    prog(dia == 1 and h == 12, f"reto:{sem}", lambda: publicar("reto",
+    def pub(tipo, texto, boton=None):
+        return lambda: bool(publicar(tipo, texto, boton=boton))
+
+    prog(9 <= h <= 17, f"deal:{f}", deal_del_dia)
+    prog(dia == 0 and 8 <= h <= 12, f"metricas:{sem}", reporte_metricas)
+    prog(dia == 0 and 10 <= h <= 13, f"peticion:{sem}", pub("peticion", mensaje_peticion()))
+    prog(dia == 0 and 11 <= h <= 15 and dom <= 7, f"miembro_mes:{a.strftime('%Y-%m')}", miembro_del_mes)
+    prog(dia == 0 and 14 <= h <= 18, f"resumen_pet:{sem}", _resumen_peticiones)
+    prog(dia == 1 and 12 <= h <= 17, f"reto:{sem}", pub("reto",
          f"🎯 <b>Reto de la semana — {t['emoji']} {t['nombre']}</b>\n\n{t['reto']}\n\n<i>El mejor hallazgo se destaca el domingo 👇</i>"))
-    prog(dia == 1 and h == 20, f"rec_vip_mar:{sem}", lambda: publicar("recordatorio", recordatorio_vip(), boton=BTN_VIP))
-    prog(dia == 2 and h == 12, f"tendencia:{sem}", lambda: publicar("tendencia", tendencia_semana()))
-    prog(dia == 2 and h == 18, f"poll:{sem}", _poll_semana)
-    prog(dia == 3 and h == 12, f"quiz:{sem}", _quiz_semana)
-    prog(dia == 3 and h == 20, f"rec_vip_jue:{sem}", lambda: publicar("recordatorio", recordatorio_vip(), boton=BTN_VIP))
-    prog(dia == 3 and h == 21, f"resultado_pet:{sem}", _resultado_semanal)
-    prog(dia == 4 and h == 17, f"viernes:{sem}", lambda: publicar("recomendaciones", random.choice(VIERNES)))
-    prog(dia == 5 and h == 11, f"icebreaker:{sem}", lambda: publicar("icebreaker", icebreaker()))
-    prog(dia == 6 and h == 11, f"tip:{sem}", lambda: publicar("tip", f"💡 <b>Tip de temporada — {t['emoji']} {t['nombre']}</b>\n\n{t['tip']}"
-                                                              if int(sem.split('w')[1]) % 3 == 0 else random.choice(TIPS)))
-    prog(dia == 6 and h == 12, f"top:{sem}", top_semana)
-    prog(dom == 1 and h == 10, f"reglas:{a.strftime('%Y-%m')}", lambda: publicar("reglas", texto_reglas()))
+    prog(dia == 1 and 19 <= h <= 22, f"rec_vip_mar:{sem}", pub("recordatorio", recordatorio_vip(), boton=BTN_VIP))
+    prog(dia == 2 and 12 <= h <= 16, f"tendencia:{sem}", pub("tendencia", tendencia_semana()))
+    prog(dia == 2 and 17 <= h <= 21, f"poll:{sem}", _poll_semana)
+    prog(dia == 3 and 12 <= h <= 16, f"quiz:{sem}", _quiz_semana)
+    prog(dia == 3 and 19 <= h <= 21, f"rec_vip_jue:{sem}", pub("recordatorio", recordatorio_vip(), boton=BTN_VIP))
+    prog(dia == 3 and 20 <= h <= 23, f"resultado_pet:{sem}", _resultado_semanal)
+    prog(dia == 4 and 16 <= h <= 20, f"viernes:{sem}", pub("recomendaciones", random.choice(VIERNES)))
+    prog(dia == 5 and 10 <= h <= 15, f"icebreaker:{sem}", pub("icebreaker", icebreaker()))
+    prog(dia == 6 and 10 <= h <= 14, f"tip:{sem}", pub("tip", f"💡 <b>Tip de temporada — {t['emoji']} {t['nombre']}</b>\n\n{t['tip']}"
+                                                         if int(sem.split('w')[1]) % 3 == 0 else random.choice(TIPS)))
+    prog(dia == 6 and 12 <= h <= 18, f"top:{sem}", top_semana)
+    prog(dom == 1 and 10 <= h <= 15, f"reglas:{a.strftime('%Y-%m')}", pub("reglas", texto_reglas()))
     # Pregunta de temporada = petición suave (sus respuestas también van al VIP)
-    prog(dia == 2 and h == 10, f"preg_temp:{sem}", lambda: publicar("pregunta_temporada",
+    prog(dia == 2 and 10 <= h <= 14, f"preg_temp:{sem}", pub("pregunta_temporada",
          f"{t['pregunta']}\n\n<i>Responde a este mensaje: lo que pidan, el equipo lo busca para el VIP 👇</i>"))
 
 
