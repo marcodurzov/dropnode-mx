@@ -340,6 +340,38 @@ def extraer_html(soup, base):
 
 
 # ─────────────────────────────────────────────
+# Parser dedicado de Liverpool: tarjetas de catálogo (selectores tomados de un repo público)
+#   li.m-product__card · h3.a-card-brand · h3.card-title · p.a-card-price · p.a-card-discount
+# ─────────────────────────────────────────────
+def extraer_liverpool(soup, base):
+    res = []
+    for card in soup.select("li.m-product__card"):
+        try:
+            a = card.select_one("a[href]")
+            marca = card.select_one("h3.a-card-brand")
+            titulo = card.select_one("h3.card-title, .a-card-description")
+            pr = card.select_one("p.a-card-price, .a-card-price")
+            ds = card.select_one("p.a-card-discount, .a-card-discount")
+            if not (a and pr and ds):
+                continue
+            precio = _precio(pr.get_text(" ", strip=True))
+            m = re.search(r"(\d{1,2})\s*%", ds.get_text(" ", strip=True))
+            if precio <= 0 or not m:
+                continue
+            pct = int(m.group(1))
+            if not 5 <= pct <= 90:
+                continue
+            nombre = " ".join(x.get_text(" ", strip=True) for x in (marca, titulo) if x)
+            img = card.select_one("img")
+            res.append({"nombre": nombre, "precio": precio, "orig": round(precio / (1 - pct / 100)),
+                        "url": _abs(base, a["href"]),
+                        "thumb": (img.get("src") or img.get("data-src") or "") if img else "", "pcts": [pct]})
+        except Exception:
+            continue
+    return res
+
+
+# ─────────────────────────────────────────────
 # Orquestación por tienda
 # ─────────────────────────────────────────────
 def _descubrir(soup, base, n=3):
@@ -446,8 +478,10 @@ def _renderizar(url, espera_ms=4000):
 def _estrategias(paginas, base, detalle, clave):
     """Corre las 3 estrategias sobre las páginas; devuelve lista de (estrategia, crudo)."""
     crudos = []
-    for estrategia, fn in (("jsonld", extraer_jsonld), ("json_embebido", extraer_json_embebido),
-                           ("html", extraer_html)):
+    estrategias = [("jsonld", extraer_jsonld), ("json_embebido", extraer_json_embebido), ("html", extraer_html)]
+    if clave == "liverpool":
+        estrategias.insert(0, ("liverpool", extraer_liverpool))
+    for estrategia, fn in estrategias:
         total = 0
         for u, soup in paginas:
             try:
