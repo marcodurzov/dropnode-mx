@@ -1,5 +1,5 @@
 # =============================================================
-# DROPNODE MX — main.py v3.7
+# DROPNODE MX — main.py v3.8
 # GitHub Actions cada 15 min. Cambios vs v3.5:
 #   - Horarios/reglas centralizados (horarios.py)
 #   - Cola VIP->Free de 60 min (TODO el free sale de aquí, también ML)
@@ -49,6 +49,7 @@ ciclo_palacio_a  = _imp("scraper_api",       "ejecutar_ciclo_palacio_api")
 ciclo_petco_a    = _imp("scraper_api",       "ejecutar_ciclo_petco_api")
 ciclo_ml_deals   = _imp("scraper_api",       "ejecutar_ciclo_ml_deals")
 ciclo_ml_catalogo = _imp("scraper_ml_catalogo", "ejecutar_ciclo_ml_catalogo")
+ciclo_ml_http    = _imp("scraper_ml_http",   "ejecutar_ciclo_ml_http")
 ciclo_sams_a     = _imp("scraper_api",       "ejecutar_ciclo_sams_api")
 ciclo_elektra    = _imp("scraper_elektra",   "ejecutar_ciclo_elektra")
 ciclo_bodega     = _imp("scraper_bodega",    "ejecutar_ciclo_bodega")
@@ -65,6 +66,8 @@ except Exception as e:
 
 from community_manager import (ejecutar_community_manager, procesar_actualizaciones, fomo_vip_al_free)
 import resumenes
+import contenido
+import random
 
 verificar_match  = _imp("peticiones", "verificar_match", lambda *a, **k: None)
 temporada_activa = _imp("temporadas", "temporada_activa", lambda: (None, None))
@@ -100,7 +103,10 @@ def fmt_vip(item, sf):
     p, po, d = item["precio_actual"], item["precio_original"], item["descuento"] * 100
     etiqueta = "🚨 ERROR DE PRECIO" if sf >= 8 else ("🔥 HOT DEAL" if d >= 35 else "⚡ ALERTA VIP")
     _, ti = temporada_activa()
-    tag = f" · {ti['emoji']} {ti['nombre']}" if ti else ""
+    if T.bonus_item(item["nombre"], item.get("cat_nombre", "")) > 0:
+        tag = f" · {T.etiqueta()}"
+    else:
+        tag = f" · {ti['emoji']} {ti['nombre']}" if ti else ""
     noc = " · 🌙 NOCTURNO" if H.modo_nocturno() else ""
     flash = " · ⏰ SOLO HOY" if item.get("es_flash") else ""
     m = (f"{EMOICONO(t)} <b>{etiqueta} — {E.esc(_td(t))}{flash}{tag}{noc}</b> {item['cat_emoji']}\n\n"
@@ -119,7 +125,8 @@ def EMOICONO(t):
 def fmt_free(item):
     t = item["tienda"]
     p, po, d = item["precio_actual"], item["precio_original"], item["descuento"] * 100
-    m = f"{EMOICONO(t)} <b>{E.esc(_td(t))}</b> {item.get('cat_emoji', '🛍️')}\n\n<b>{E.esc(item['nombre'][:60])}</b>\n\n<b>${p:,.0f} MXN</b> (-{d:.0f}%)\n"
+    temp = f"\n{T.etiqueta()}" if T.bonus_item(item["nombre"], item.get("cat_nombre", "")) > 0 else ""
+    m = f"{EMOICONO(t)} <b>{E.esc(_td(t))}</b> {item.get('cat_emoji', '🛍️')}{temp}\n\n<b>{E.esc(item['nombre'][:60])}</b>\n\n<b>${p:,.0f} MXN</b> (-{d:.0f}%)\n"
     if po > p:
         m += f"<s>${po:,.0f}</s>\n"
     if item.get("envio_gratis"):
@@ -163,10 +170,12 @@ def procesar_cola_free():
         usados.append(e["id"])
         if not item.get("nombre") or not item.get("url"):
             continue
+        if float(item.get("descuento") or 0) > H.FREE_MAX_DESCUENTO:       # lo mejor es del VIP
+            continue
         if not E.puede_publicar_item(item, e.get("score", 0), "free"):
             continue
-        mid = E.tg_send(FREE, fmt_free(item), boton=BTN_VIP,
-                        foto=item["thumbnail"] if str(item.get("thumbnail", "")).startswith("http") else None)
+        con_foto = str(item.get("thumbnail", "")).startswith("http") and random.random() < 0.4   # free: foto aleatoria
+        mid = E.tg_send(FREE, fmt_free(item), boton=BTN_VIP, foto=item["thumbnail"] if con_foto else None)
         if mid:
             enviados.append(e["id"])
             E.registrar_publicacion(item, "free", e.get("score", 0), mid)
@@ -197,6 +206,7 @@ def _multi(clave):
 
 
 SCRAPERS = [
+    ("ML HTTP",       ciclo_ml_http, 8),
     ("Walmart",        _con_respaldo(ciclo_walmart, "walmart"), 3),
     ("Liverpool",      _con_respaldo(ciclo_liverpool, "liverpool"), 3),
     ("Amazon",         _con_respaldo(ciclo_amazon, "amazon"), 3),
@@ -246,6 +256,8 @@ def _correr_fuente(nombre, func):
         try:
             item = E.aplanar(raw)
             if item["descuento"] < 0.12 or item["precio_actual"] <= 0 or not item["url"]:
+                continue
+            if E.es_basura(item["nombre"], item["precio_actual"]):
                 continue
             try:
                 bs = calcular_score(descuento_real=item["descuento"], stock=99, categoria=item["cat_nombre"],
@@ -302,24 +314,43 @@ def _claim(clave):
     return E.reclamar_evento(f"tp:{clave}", fallback=(H.ahora().minute < 15))
 
 
+def _tarea(clave, cuando, fn):
+    """Corre `fn` una sola vez dentro de su ventana. GitHub a veces salta corridas: por eso cada tarea tiene una
+    VENTANA (no una hora exacta). Si fn devuelve False (p. ej. Telegram falló), se libera el candado y se reintenta."""
+    if not cuando or not _claim(clave):
+        return
+    try:
+        r = fn()
+    except Exception as e:
+        logger.error(f"[TAREA {clave}] {e}", exc_info=True)
+        E.liberar_evento(f"tp:{clave}")
+        return
+    if r is False:
+        E.liberar_evento(f"tp:{clave}")
+
+
 def tareas_periodicas():
     a = H.ahora()
     h, dia, mins, f = a.hour, a.weekday(), a.hour * 60 + a.minute, H.fecha_mx(a)
+    sem = a.isocalendar()[1]
+    mes = a.strftime("%Y-%m")
 
-    # Cierre FREE: 6:00-7:00 PM  |  Cierre VIP: 11:00 PM en adelante (tope 11:59 como respaldo)
-    if 18 * 60 <= mins <= H.FREE_FIN and _claim(f"resumen_free:{f}"):
-        resumenes.resumen_free()
-    if 23 * 60 <= mins <= 23 * 60 + 59 and _claim(f"resumen_vip:{f}"):
-        resumenes.resumen_vip()
-    if dia == 6 and h == 21 and _claim(f"semanal_vip:{a.isocalendar()[1]}"):
-        resumenes.resumen_semanal_vip()
-    if h == 8 and _claim(f"salud:{f}"):
-        resumenes.reporte_salud_admin()
+    # Cierres del día
+    _tarea(f"resumen_free:{f}", 17 * 60 + 30 <= mins <= H.FREE_FIN, resumenes.resumen_free)
+    _tarea(f"resumen_vip:{f}", 22 * 60 + 30 <= mins <= H.VIP_FIN, resumenes.resumen_vip)
+    _tarea(f"semanal_vip:{sem}", dia == 6 and 20 * 60 <= mins <= 23 * 60, resumenes.resumen_semanal_vip)
+    _tarea(f"salud:{f}", 8 * 60 <= mins <= 12 * 60, resumenes.reporte_salud_admin)
 
-    if h in (11, 18) and H.en_horario_free() and _claim(f"financiero:{f}:{h}"):
-        enviar_mensaje_financiero()
-    if h in (12, 17) and H.en_horario_free() and _claim(f"recordatorio_vip:{f}:{h}"):
-        enviar_recordatorio_vip()
+    # Identidad: Plata Card / Nu (con aviso de referido), recordatorio del VIP y temporada
+    _tarea(f"promo_free_a:{f}", 11 * 60 <= mins <= 14 * 60, contenido.promo_financiera_free)
+    _tarea(f"promo_free_b:{f}", 16 * 60 + 30 <= mins <= 18 * 60 + 30, contenido.promo_financiera_free)
+    _tarea(f"promo_vip:{f}", 12 * 60 <= mins <= 20 * 60, contenido.promo_financiera_vip)
+    _tarea(f"promo_grupo:{f}", 13 * 60 <= mins <= 20 * 60, contenido.promo_financiera_grupo)
+    _tarea(f"recordatorio_vip_a:{f}", 12 * 60 <= mins <= 14 * 60, enviar_recordatorio_vip)
+    _tarea(f"recordatorio_vip_b:{f}", 15 * 60 + 30 <= mins <= 17 * 60 + 30, enviar_recordatorio_vip)
+    _tarea(f"temporada_mes:{mes}", a.day <= 5 and 9 * 60 <= mins <= 18 * 60, contenido.temporada_inicio_mes)
+    _tarea(f"temporada_sem_a:{sem}", dia == 1 and 11 * 60 <= mins <= 16 * 60, contenido.temporada_semana_free)
+    _tarea(f"temporada_sem_b:{sem}", dia == 4 and 11 * 60 <= mins <= 16 * 60, contenido.temporada_semana_free)
 
     if os.environ.get("ENABLE_CUPONES", "0") == "1":        # apagado por defecto (ver HANDOFF.md)
         try:
@@ -327,12 +358,12 @@ def tareas_periodicas():
         except Exception as e:
             logger.warning(f"[CUPONES] {e}")
 
-    if dia == 0 and h == 9 and _claim(f"reporte_lunes:{f}"):
-        _, ti = temporada_activa()
+    def _reporte_lunes():
         t = T.actual()
-        E.tg_send(VIP, f"<b>Reporte semanal — DropNode VIP</b>\n\nLa semana arranca con {t['emoji']} <b>{t['nombre']}</b>: "
-                       f"el equipo prioriza {E.esc(', '.join(t['productos'][:3]))}.\n\n"
-                       "<i>Horario VIP: 6:30 AM - 11:30 PM · de madrugada solo errores de precio (8+).</i>")
+        return bool(E.tg_send(VIP, f"<b>Reporte semanal — DropNode VIP</b>\n\nLa semana arranca con {t['emoji']} <b>{t['nombre']}</b>: "
+                                   f"el equipo prioriza {E.esc(', '.join(t['productos'][:3]))}.\n\n"
+                                   "<i>Horario VIP: 6:30 AM - 11:30 PM · de madrugada solo errores de precio (8+).</i>"))
+    _tarea(f"reporte_lunes:{f}", dia == 0 and 9 * 60 <= mins <= 14 * 60, _reporte_lunes)
     try:
         alertas_temp()
     except Exception:
@@ -367,7 +398,7 @@ def _safe(nombre, fn):
 
 if __name__ == "__main__":
     t = T.actual()
-    logger.info(f"\n{'=' * 52}\n DROPNODE MX v3.7 — {H.ahora().strftime('%d/%m/%Y %H:%M')} MX · {t['emoji']} {t['nombre']}"
+    logger.info(f"\n{'=' * 52}\n DROPNODE MX v3.8 — {H.ahora().strftime('%d/%m/%Y %H:%M')} MX · {t['emoji']} {t['nombre']}"
                 f"{' · 🌙 NOCTURNO' if H.modo_nocturno() else ''}\n VIP 6:30-23:30 · Free 8:00-19:00 · ventana 60 min · {len(SCRAPERS)} fuentes\n{'=' * 52}")
     _safe("setup", setup)
     _safe("cola_free", procesar_cola_free)
