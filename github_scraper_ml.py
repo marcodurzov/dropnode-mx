@@ -587,8 +587,12 @@ def msg_vip_caption(item, stats):
 # ─────────────────────────────────────────────
 # PROCESAMIENTO
 # ─────────────────────────────────────────────
+_FUN = {"leidos": 0, "basura": 0, "sin_descuento": 0, "repetidos": 0, "publicables": 0}
+
+
 def procesar(prod_raw, pagina_es_flash=False):
     try:
+        _FUN["leidos"] += 1
         item_id=str(prod_raw.get("id","")); nombre=str(prod_raw.get("title",""))[:80]
         precio=float(prod_raw.get("price",0)); p_orig=prod_raw.get("original_price")
         p_orig=float(p_orig) if p_orig else 0; link=str(prod_raw.get("permalink",""))
@@ -601,15 +605,17 @@ def procesar(prod_raw, pagina_es_flash=False):
         ev=bool(prod_raw.get("envio_gratis",False))
         if not nombre or precio<=0 or not link: return None
         if precio>200000 or precio<10: return None
+        if E.es_basura(nombre, precio): _FUN["basura"] += 1; return None
         descuento=0.0
         if p_orig and p_orig>precio: descuento=(p_orig-precio)/p_orig
         if cupon and c_monto>0: descuento=max(descuento,c_monto/precio)
         es_remate="remate" in link.lower()
-        if descuento < (0.05 if es_remate else 0.15): return None
+        if descuento < (0.05 if es_remate else 0.15): _FUN["sin_descuento"] += 1; return None
         pid=upsert_prod(link,nombre,"ML Ofertas",item_id)
         guardar_precio(pid,precio,p_orig or precio,stk or 0)
         sc=score(descuento,stk,precio,cupon,ev,es_flash)
-        if not E.puede_publicar_pid(pid,sc,precio,"vip"): return None   # política de repeticiones (estado.py)
+        if not E.puede_publicar_pid(pid,sc,precio,"vip"): _FUN["repetidos"] += 1; return None   # política de repeticiones (estado.py)
+        _FUN["publicables"] += 1
         stats=get_stats(pid,precio)
         thumb_hd=thumb.replace("I.jpg","O.jpg") if thumb else ""
         return {"id":item_id,"pid":pid,"nombre":nombre,"precio":precio,
@@ -641,37 +647,54 @@ def main():
 
     todos = []
     total_scrapeado = 0
-    # Sin proxy: 2 intentos directos. Con proxy: 1 directo (barato) y luego proxy con pocas páginas (se paga por GB).
-    PAGINAS_PROXY = [PAGINAS_FLASH[0], PAGINAS_FLASH[2], PAGINAS_BASE[0], PAGINAS_BASE[1]]
-    if NAV.proxy_cfg():
-        intentos = [(None, PAGINAS), (NAV.proxy_cfg(), PAGINAS_PROXY)]
-    else:
-        intentos = [(None, PAGINAS), (None, PAGINAS)]
-    with sync_playwright() as pw:
-        for n_int, (proxy, paginas_run) in enumerate(intentos):
-            if total_scrapeado > 0:
-                break
-            if n_int > 0:
-                logger.warning(f"[PW] intento {n_int + 1}/{len(intentos)}{' con proxy' if proxy else ''}")
-                time.sleep(random.uniform(8, 20))
-            browser, page = NAV.lanzar(pw, proxy=proxy)
-            for pagina in paginas_run:
-                items_pag = scrape_pagina(page, pagina)
-                if items_pag is None:                    # ML nos bloqueó: no gastar tiempo en las otras páginas
-                    break
-                for prod_raw in items_pag:
-                    it = procesar(prod_raw, pagina_es_flash=pagina.get("es_flash", False))
-                    if it: todos.append(it)
-                total_scrapeado += len(items_pag)
-                time.sleep(random.uniform(2, 4))
-            browser.close()
 
-    if total_scrapeado < 10:
-        logger.warning(f"[GITHUB] Solo {total_scrapeado} items en Playwright — activando API fallback")
-        for prod_raw in ml_api_fallback(50):
-            it = procesar(prod_raw)
-            if it: todos.append(it)
-    E.log_fuente("ML Playwright", total_scrapeado, "" if total_scrapeado else "0 items")
+    # 1) HTTP simple (sin navegador): /ofertas ya viene renderizado; es lo más ligero y lo que mejor pasa
+    fuente = "ML HTTP"
+    info_http = {}
+    try:
+        import scraper_ml_http as MH
+        dia = ahora.timetuple().tm_yday
+        cats = [MH.CATEGORIAS[(dia + i) % len(MH.CATEGORIAS)] for i in (0, 3, 6)]
+        raws, info_http = MH.obtener_raw(max_paginas=5, categorias=cats)
+    except Exception as e:
+        logger.warning(f"[ML HTTP] {e}")
+        raws = []
+    for prod_raw in raws:
+        it = procesar(prod_raw)
+        if it: todos.append(it)
+    total_scrapeado = len(raws)
+    logger.info(f"[ML HTTP] tarjetas={len(raws)} info={info_http}")
+
+    # 2) Navegador solo si HTTP no sacó nada
+    if total_scrapeado == 0:
+        fuente = "ML Playwright"
+        # Sin proxy: 2 intentos directos. Con proxy: 1 directo (barato) y luego proxy con pocas páginas (se paga por GB).
+        PAGINAS_PROXY = [PAGINAS_FLASH[0], PAGINAS_FLASH[2], PAGINAS_BASE[0], PAGINAS_BASE[1]]
+        if NAV.proxy_cfg():
+            intentos = [(None, PAGINAS), (NAV.proxy_cfg(), PAGINAS_PROXY)]
+        else:
+            intentos = [(None, PAGINAS), (None, PAGINAS)]
+        with sync_playwright() as pw:
+            for n_int, (proxy, paginas_run) in enumerate(intentos):
+                if total_scrapeado > 0:
+                    break
+                if n_int > 0:
+                    logger.warning(f"[PW] intento {n_int + 1}/{len(intentos)}{' con proxy' if proxy else ''}")
+                    time.sleep(random.uniform(8, 20))
+                browser, page = NAV.lanzar(pw, proxy=proxy)
+                for pagina in paginas_run:
+                    items_pag = scrape_pagina(page, pagina)
+                    if items_pag is None:                    # ML nos bloqueó: no gastar tiempo en las otras páginas
+                        break
+                    for prod_raw in items_pag:
+                        it = procesar(prod_raw, pagina_es_flash=pagina.get("es_flash", False))
+                        if it: todos.append(it)
+                    total_scrapeado += len(items_pag)
+                    time.sleep(random.uniform(2, 4))
+                browser.close()
+
+
+    E.log_fuente(fuente, total_scrapeado, "" if total_scrapeado else "0 items")
     if total_scrapeado == 0:
         E.admin_msg("⚠️ DropNode: el navegador no pudo leer Mercado Libre (0 productos).\n" + (_DIAG["txt"] or "sin detalle"),
                     clave=f"ml_cero:{hoy}:{hora // 3}")
@@ -733,7 +756,12 @@ def main():
     if hora == 7 and vip_n == 0 and E.reclamar_evento(f"buenos_dias:{hoy}", fallback=False):
         enviar(CHANNEL_VIP_ID, "🌅 *Buenos días — DropNode VIP*\n\nEl equipo ya está revisando Solo Hoy, Remates y todas las secciones.\n_Solo publicamos cuando hay algo real._")
 
-    logger.info(f"[GITHUB v12] VIP:{vip_n} Excl:{len(ids_excl)} Cola free:{encolados}")
+    logger.info(f"[GITHUB v12] VIP:{vip_n} Excl:{len(ids_excl)} Cola free:{encolados} embudo={_FUN}")
+    if total_scrapeado > 0 and vip_n == 0 and encolados == 0:
+        E.admin_msg(f"ℹ️ ML ({fuente}): leí {_FUN['leidos']} productos pero no publiqué ninguno.\n"
+                    f"Sin descuento ≥15%: {_FUN['sin_descuento']} · accesorios/baratos: {_FUN['basura']} · "
+                    f"ya publicados antes: {_FUN['repetidos']} · publicables: {_FUN['publicables']}",
+                    clave=f"ml_embudo:{hoy}:{hora // 3}")
 
 
 if __name__ == "__main__":
