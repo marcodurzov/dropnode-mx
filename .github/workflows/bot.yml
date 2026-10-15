@@ -20,6 +20,12 @@ jobs:
         with:
           python-version: '3.11'
           cache: 'pip'
+      - name: Cookies de ML (se conservan entre corridas)
+        uses: actions/cache@v4
+        with:
+          path: .cache
+          key: ml-cookies-bot-${{ github.run_id }}
+          restore-keys: ml-cookies-bot-
       - run: pip install -r requirements.txt
       - name: Instalar navegador (solo se usa si una tienda necesita JavaScript)
         continue-on-error: true      # si falla, el bot sigue (el render JS es opcional)
@@ -40,6 +46,7 @@ jobs:
           AMAZON_TAG:           ${{ secrets.AMAZON_TAG }}
           MAKE_WEBHOOK_URL:     ${{ secrets.MAKE_WEBHOOK_URL }}
           ADMIN_CHAT_ID:        ${{ secrets.ADMIN_CHAT_ID }}      # opcional (tu ID de Telegram)
+          ANTHROPIC_API_KEY:    ${{ secrets.ANTHROPIC_API_KEY }}  # opcional (respuestas con IA en la comunidad)
           PROXY_URL:            ${{ secrets.PROXY_URL }}          # opcional (anyIP)
           ENABLE_CUPONES:       "0"
           RENDER_JS:            "1"
