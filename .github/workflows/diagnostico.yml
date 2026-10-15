@@ -17,6 +17,11 @@ jobs:
       - name: Instalar navegador (para páginas con JavaScript)
         continue-on-error: true      # si falla, el bot sigue (el render JS es opcional)
         run: playwright install --with-deps chromium
+      - name: Instalar Scrapling (prueba opcional)
+        continue-on-error: true
+        run: |
+          pip install "scrapling[fetchers]"
+          scrapling install
       - name: Diagnóstico
         run: python diagnostico.py
         env:
