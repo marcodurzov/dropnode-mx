@@ -175,7 +175,7 @@ def extraer_jsonld(soup, base):
             img = p.get("image")
             img = img[0] if isinstance(img, list) and img else (img if isinstance(img, str) else "")
             res.append({"nombre": p.get("name", ""), "precio": precio, "orig": orig,
-                        "url": _abs(base, p.get("url") or offers.get("url") or ""), "thumb": img or ""})
+                        "url": _abs(base, p.get("url") or offers.get("url") or p.get("@id") or offers.get("@id") or ""), "thumb": img or ""})
     return res
 
 
@@ -253,18 +253,30 @@ def extraer_json_embebido(soup, base):
 # ─────────────────────────────────────────────
 # Estrategia 3: VTEX
 # ─────────────────────────────────────────────
-def extraer_vtex(base, sesion):
-    try:
-        time.sleep(random.uniform(2, 4))
-        r = sesion.get(f"{base}/api/catalog_system/pub/products/search",
-                       params={"O": "OrderByBestDiscountDESC", "_from": 0, "_to": 29}, timeout=20)
-        if r.status_code not in (200, 206):
-            return [], f"HTTP {r.status_code}"
-        data = r.json()
-        if not isinstance(data, list):
-            return [], "no-lista"
-    except Exception as e:
-        return [], f"ERROR {str(e)[:60]}"
+def extraer_vtex(base, sesion, paginas=2):
+    """API VTEX ordenada por mayor descuento. `paginas` x 50 productos."""
+    data = []
+    for i in range(paginas):
+        try:
+            time.sleep(random.uniform(2, 4))
+            r = sesion.get(f"{base}/api/catalog_system/pub/products/search",
+                           params={"O": "OrderByBestDiscountDESC", "_from": i * 50, "_to": i * 50 + 49}, timeout=20)
+            if r.status_code not in (200, 206):
+                if not data:
+                    return [], f"HTTP {r.status_code}"
+                break
+            parte = r.json()
+            if not isinstance(parte, list):
+                if not data:
+                    return [], "no-lista"
+                break
+            data += parte
+            if len(parte) < 50:
+                break
+        except Exception as e:
+            if not data:
+                return [], f"ERROR {str(e)[:60]}"
+            break
     res = []
     for p in data:
         try:
@@ -432,6 +444,8 @@ def _a_item(clave, r, estrategia="", razones=None):
         return no("precio_bajo")
     if orig <= precio:
         return no("sin_precio_tachado")
+    if orig == int(orig) and 2020 <= orig <= 2030:      # "Hot Sale 2026" no es un precio
+        return no("precio_anterior_parece_anio")
     desc = (orig - precio) / orig
     tope = MAX_DESC_HTML if estrategia == "html" else MAX_DESC
     if estrategia == "html":                        # la heurística HTML exige evidencia: un % visible que cuadre con los precios
