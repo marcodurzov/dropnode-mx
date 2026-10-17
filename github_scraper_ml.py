@@ -654,8 +654,8 @@ def main():
     try:
         import scraper_ml_http as MH
         dia = ahora.timetuple().tm_yday
-        cats = [MH.CATEGORIAS[(dia + i) % len(MH.CATEGORIAS)] for i in (0, 3, 6)]
-        raws, info_http = MH.obtener_raw(max_paginas=5, categorias=cats)
+        cats = [MH.CATEGORIAS[(dia + i) % len(MH.CATEGORIAS)] for i in (0, 5)]
+        raws, info_http = MH.obtener_raw(max_paginas=3, categorias=cats)     # 5 páginas por corrida: poco gasto de proxy
     except Exception as e:
         logger.warning(f"[ML HTTP] {e}")
         raws = []
