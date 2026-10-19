@@ -74,6 +74,23 @@ def correr():
     chk(bool(os.environ.get("ML_APP_ID") and os.environ.get("ML_SECRET")), "ML_APP_ID y ML_SECRET configurados", "aviso")
     chk(bool(os.environ.get("PROXY_URL", "").strip()), "PROXY_URL configurado (necesario para Walmart, Elektra, Palacio, Bodega, Coppel)", "aviso")
 
+    # ── IA de la comunidad (opcional): prueba mínima de la clave ──
+    clave_ia = os.environ.get("ANTHROPIC_API_KEY", "").strip()
+    if not clave_ia:
+        chk(False, "ANTHROPIC_API_KEY no configurada (la IA de la comunidad queda apagada)", "aviso")
+    else:
+        try:
+            import ia
+            r = requests.post("https://api.anthropic.com/v1/messages",
+                              headers={"x-api-key": clave_ia, "anthropic-version": "2023-06-01",
+                                       "content-type": "application/json"},
+                              json={"model": ia.MODELO, "max_tokens": 5,
+                                    "messages": [{"role": "user", "content": "Hola"}]}, timeout=20)
+            chk(r.status_code == 200, f"ANTHROPIC_API_KEY válida (respuesta HTTP {r.status_code})"
+                + ("" if r.status_code == 200 else " — revisa la clave o el saldo"), "aviso")
+        except Exception as e:
+            chk(False, f"ANTHROPIC_API_KEY: no se pudo probar ({str(e)[:60]})", "aviso")
+
     # ── Base de datos ──
     db = E.get_db()
     if not db:
