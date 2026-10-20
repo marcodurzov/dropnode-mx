@@ -104,7 +104,8 @@ def get_stats(pid, precio_actual):
 # CONFIGURACION
 # ─────────────────────────────────────────────
 DESCUENTO_HOT      = 0.35
-MAX_VIP            = 12
+MAX_VIP            = 3      # alertas VIP por corrida (el scraper corre cada 30 min)
+MAX_VIP_DIA        = 36     # tope diario de alertas VIP (todas las fuentes); súbelo si quieres más volumen
 MAX_FREE           = 4
 
 # Páginas ML — Flash primero, luego base, luego categorías rotativas
@@ -113,8 +114,6 @@ PAGINAS_FLASH = [
      "nombre":"Solo Hoy","emoji":"⏰","es_flash":True},
     {"url":"https://www.mercadolibre.com.mx/ofertas/solo-hoy?page=2",
      "nombre":"Solo Hoy p2","emoji":"⏰","es_flash":True},
-    {"url":"https://www.mercadolibre.com.mx/remates",
-     "nombre":"Remates","emoji":"💥","es_flash":True},
     {"url":"https://www.mercadolibre.com.mx/ofertas?deal_type=DAILY_DEAL",
      "nombre":"Oferta del Dia","emoji":"📅","es_flash":True},
     # URL alternativa por si cambia la principal
@@ -669,7 +668,7 @@ def main():
     if total_scrapeado == 0:
         fuente = "ML Playwright"
         # Sin proxy: 2 intentos directos. Con proxy: 1 directo (barato) y luego proxy con pocas páginas (se paga por GB).
-        PAGINAS_PROXY = [PAGINAS_FLASH[0], PAGINAS_FLASH[2], PAGINAS_BASE[0], PAGINAS_BASE[1]]
+        PAGINAS_PROXY = PAGINAS_BASE[:3]      # las páginas de /ofertas son las que cargan por proxy
         if NAV.proxy_cfg():
             intentos = [(None, PAGINAS), (NAV.proxy_cfg(), PAGINAS_PROXY)]
         else:
@@ -716,8 +715,9 @@ def main():
 
     # ── VIP (6:30 AM-11:30 PM normal · resto del día solo score >= 8) ──
     vip_n = 0; ids_vip = set(); ids_excl = set()
+    cupo_vip = max(0, min(MAX_VIP, MAX_VIP_DIA - E.contar_alertas("vip", H.dia_inicio_utc())))
     for item in unicos:
-        if vip_n >= MAX_VIP: break
+        if vip_n >= cupo_vip: break
         if not H.vip_puede_publicar(item["score"]):
             continue
         es_excl = H.es_exclusivo(item["descuento"], item["score"], item.get("es_flash"))
@@ -754,7 +754,7 @@ def main():
                   boton=("📲 Ver Canal VIP", LAUNCHPASS_LINK))
 
     if hora == 7 and vip_n == 0 and E.reclamar_evento(f"buenos_dias:{hoy}", fallback=False):
-        enviar(CHANNEL_VIP_ID, "🌅 *Buenos días — DropNode VIP*\n\nEl equipo ya está revisando Solo Hoy, Remates y todas las secciones.\n_Solo publicamos cuando hay algo real._")
+        enviar(CHANNEL_VIP_ID, "🌅 *Buenos días — DropNode VIP*\n\nEl equipo ya está revisando las ofertas del día y todas las secciones.\n_Solo publicamos cuando hay algo real._")
 
     logger.info(f"[GITHUB v12] VIP:{vip_n} Excl:{len(ids_excl)} Cola free:{encolados} embudo={_FUN}")
     if total_scrapeado > 0 and vip_n == 0 and encolados == 0:
