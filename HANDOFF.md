@@ -1,4 +1,4 @@
-[HANDOFF (1).md](https://github.com/user-attachments/files/33556581/HANDOFF.1.md)
+[HANDOFF.md](https://github.com/user-attachments/files/33732818/HANDOFF.md)
 # DropNode MX — HANDOFF (pega este archivo al inicio de una conversación nueva)
 
 > Mantén este archivo en la raíz del repo `marcodurzov/dropnode-mx` y en los archivos del Proyecto de Claude.
@@ -20,6 +20,7 @@ Regla no negociable: NUNCA mencionar automatización en público. Todo es "el eq
 | Repeticiones | score < 8: 1 vez por producto cada 14 días; score ≥ 8: hasta 3 veces (mín. 4 h entre ellas); se permite repetir si el precio bajó ≥ 15%; otro vendedor = otro producto | `estado.py` (`REP_*`) |
 
 ## Hallazgos clave (oct-2026)
+- 19-oct-2026: con PROXY_URL (DataImpulse, México) el navegador SÍ lee `/ofertas` (48 tarjetas por página) aunque el HTTP simple por proxy sigue topando con el muro. El scraper de ML usa el proxy solo cuando el intento directo falla; con proxy carga 3 páginas por corrida. Tope: 3 alertas VIP por corrida y 36 por día (`MAX_VIP`, `MAX_VIP_DIA`).
 - 15-oct-2026: Mercado Libre bloquea la IP de GitHub incluso con HTTP simple y con navegador sigiloso (Scrapling): todo termina en `/gz/account-verification`. Sin `PROXY_URL` (residencial, México) ML da 0 productos. No hay arreglo solo con código.
 - GitHub NO respeta `*/15`: en la práctica corre unas 7 veces al día. Por eso todas las tareas programadas usan VENTANAS de horas (con reintento), y se recomienda un disparador externo (cron-job.org -> workflow_dispatch) cada 15 min.
 - Mercado Libre: el navegador de GitHub recibe `/gz/account-verification`. Un repo público (Joharjbe/mercadolibre-mx-scraper) muestra que `/ofertas` se sirve renderizado y se puede leer con HTTP simple (UA de escritorio, pasar por la portada, ritmo lento, parar si hay muro). Implementado en `scraper_ml_http.py`; el navegador queda como respaldo.
