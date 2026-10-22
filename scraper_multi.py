@@ -56,6 +56,20 @@ TIENDAS = {
                   ["/", "/content/ofertas"], False),
     "coppel":    ("Coppel", "🏪", "https://www.coppel.com",
                   ["/", "/ofertas"], False),
+    "bestbuy":   ("Best Buy", "🛍️", "https://www.bestbuy.com.mx",
+                  ["/", "/c/ofertas"], False),
+    "officedepot": ("Office Depot", "🖇️", "https://www.officedepot.com.mx",
+                  ["/", "/ofertas"], False),
+    "homedepot": ("The Home Depot", "🔨", "https://www.homedepot.com.mx",
+                  ["/", "/ofertas"], False),
+    "cyberpuerta": ("Cyberpuerta", "💻", "https://www.cyberpuerta.mx",
+                  ["/", "/Ofertas/"], False),
+    "suburbia":  ("Suburbia", "👗", "https://www.suburbia.com.mx",
+                  ["/", "/ofertas"], True),
+    "sanborns":  ("Sanborns", "🏬", "https://www.sanborns.com.mx",
+                  ["/", "/ofertas"], False),
+    "claroshop": ("Claro Shop", "🛒", "https://www.claroshop.com",
+                  ["/", "/ofertas"], False),
 }
 PALABRAS_OFERTA = ["oferta", "sale", "rebaja", "outlet", "promo", "descuento", "liquida", "hot-sale",
                    "buen-fin", "remate", "deals", "goldbox", "especial"]
@@ -109,6 +123,50 @@ def _intento(s, url, referer, proxies=None):
         return "", 0, f"ERROR {str(e)[:80]}"
 
 
+PROXY_PAGINAS_DIA = 16        # tope de páginas de tiendas que pueden pasar por el navegador+proxy cada día
+
+
+def _proxy_permitido():
+    """True si todavía hay cupo diario de páginas por proxy (candado en Supabase)."""
+    if os.environ.get("PROXY_SIN_TOPE") == "1":
+        return True
+    try:
+        import estado as E
+        import horarios as H
+        for i in range(PROXY_PAGINAS_DIA):
+            if E.reclamar_evento(f"pxy:{H.fecha_mx()}:{i}", fallback=False):
+                return True
+    except Exception:
+        pass
+    return False
+
+
+def _fetch_navegador_proxy(url):
+    """(html, status, nota) abriendo la página con Chromium POR EL PROXY (sin imágenes/CSS)."""
+    if os.environ.get("RENDER_JS", "1") != "1":
+        return "", 0, "sin navegador"
+    try:
+        import navegador as NAV
+        proxy = NAV.proxy_cfg()
+        if not proxy:
+            return "", 0, "sin proxy"
+        if not _proxy_permitido():
+            return "", 0, "tope diario de proxy"
+        from playwright.sync_api import sync_playwright
+        with sync_playwright() as pw:
+            b, page = NAV.lanzar(pw, proxy=proxy)
+            page.goto(url, wait_until="domcontentloaded", timeout=40000)
+            page.wait_for_timeout(4000)
+            html_ = page.content()
+            b.close()
+        low = html_[:6000].lower()
+        if len(html_) < 1500 or (any(x in low for x in BLOQUEO) and len(html_) < 60000):
+            return html_, 200, "BLOQUEADA"
+        return html_, 200, ""
+    except Exception as e:
+        return "", 0, f"ERROR {str(e)[:80]}"
+
+
 def descargar(url, sesion=None, referer=None, espera=(2, 5)):
     """(html, status, nota). nota: '', 'BLOQUEADA', 'VACIA' o el error.
     Primero directo (gratis); si lo bloquean y hay PROXY_URL, reintenta por el proxy
@@ -123,6 +181,9 @@ def descargar(url, sesion=None, referer=None, espera=(2, 5)):
             txt2, st2, nota2 = _intento(s, url, referer, proxies={"http": p, "https": p})
             if not nota2:
                 return txt2, st2, ""
+            txt3, st3, nota3 = _fetch_navegador_proxy(url)      # último recurso: navegador por proxy
+            if not nota3:
+                return txt3, st3, ""
             return txt2, st2, nota2 + " [proxy]"
     return txt, st, nota
 
