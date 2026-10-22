@@ -89,7 +89,8 @@ EMOJIS = {"walmart": "🛒", "liverpool": "🏬", "coppel": "🏪", "amazon": "�
           "costco": "🏪", "sams": "🏬", "petco": "🐾", "sears": "🏬", "palacio": "💎", "zara": "👗",
           "pullbear": "👕", "bershka": "👕", "lefties": "👕", "samsung": "📱", "lg": "📺", "sony": "🎮",
           "mercadolibre": "🛒", "tiktok_trend": "🎵", "elektra": "⚡", "bodega": "🛒", "heb": "🛒"}
-NOMBRES = {"sams": "Sam's Club", "palacio": "Palacio de Hierro", "pullbear": "Pull&Bear", "mercadolibre": "Mercado Libre",
+NOMBRES = {"bestbuy": "Best Buy", "officedepot": "Office Depot", "homedepot": "Home Depot", "claroshop": "Claro Shop",
+           "cyberpuerta": "Cyberpuerta", "suburbia": "Suburbia", "sanborns": "Sanborns", "sams": "Sam's Club", "palacio": "Palacio de Hierro", "pullbear": "Pull&Bear", "mercadolibre": "Mercado Libre",
            "tiktok_trend": "Trending", "elektra": "Elektra", "bodega": "Bodega Aurrerá", "heb": "HEB"}
 
 
@@ -133,7 +134,8 @@ def fmt_free(item):
         m += "✅ Envío gratis\n"
     m += f"\n<a href=\"{E.link_afiliado(item['url'])}\">Ver oferta</a>\n\n"
     m += ("<i>Esta alerta llegó al Canal VIP hace más de 1 hora.</i>" if item.get("en_vip")
-          else "<i>Selección del equipo. Las mejores ofertas llegan primero al Canal VIP.</i>")
+          else "<i>Selección del equipo.</i>")
+    m += "\n<i>Los descuentos de más del 40% son solo del Canal VIP.</i>"
     return m
 
 
@@ -206,7 +208,6 @@ def _multi(clave):
 
 
 SCRAPERS = [
-    ("ML HTTP",       ciclo_ml_http, 8),
     ("Walmart",        _con_respaldo(ciclo_walmart, "walmart"), 3),
     ("Liverpool",      _con_respaldo(ciclo_liverpool, "liverpool"), 3),
     ("Amazon",         _con_respaldo(ciclo_amazon, "amazon"), 3),
@@ -218,6 +219,13 @@ SCRAPERS = [
     ("Costco",         _con_respaldo(ciclo_costco, "costco"), 2),
     ("Sears",          _con_respaldo(ciclo_sears, "sears"), 2),
     ("Coppel",         _con_respaldo(ciclo_coppel, "coppel"), 2),
+    ("Best Buy",       _multi("bestbuy"), 2),
+    ("Office Depot",   _multi("officedepot"), 2),
+    ("Home Depot",     _multi("homedepot"), 2),
+    ("Cyberpuerta",    _multi("cyberpuerta"), 2),
+    ("Suburbia",       _multi("suburbia"), 2),
+    ("Sanborns",       _multi("sanborns"), 2),
+    ("Claro Shop",     _multi("claroshop"), 2),
     ("Petco API",      ciclo_petco_a, 1),
     ("Inditex",        ciclo_inditex, 1),
     ("Marcas Directo", ciclo_marcas_d, 1),
@@ -340,14 +348,15 @@ def tareas_periodicas():
     _tarea(f"resumen_vip:{f}", 22 * 60 + 30 <= mins <= H.VIP_FIN, resumenes.resumen_vip)
     _tarea(f"semanal_vip:{sem}", dia == 6 and 20 * 60 <= mins <= 23 * 60, resumenes.resumen_semanal_vip)
     _tarea(f"salud:{f}", 8 * 60 <= mins <= 12 * 60, resumenes.reporte_salud_admin)
+    _tarea(f"mensual_vip:{mes}", a.day <= 3 and 10 * 60 <= mins <= 20 * 60, resumenes.resumen_mensual_vip)
 
     # Identidad: Plata Card / Nu (con aviso de referido), recordatorio del VIP y temporada
-    _tarea(f"promo_free_a:{f}", 11 * 60 <= mins <= 14 * 60, contenido.promo_financiera_free)
-    _tarea(f"promo_free_b:{f}", 16 * 60 + 30 <= mins <= 18 * 60 + 30, contenido.promo_financiera_free)
+    _tarea(f"promo_free_a:{f}", 11 * 60 <= mins <= 14 * 60, lambda: contenido.promo_financiera_free("a"))
+    _tarea(f"promo_free_b:{f}", 16 * 60 + 30 <= mins <= 18 * 60 + 30, lambda: contenido.promo_financiera_free("b"))
     _tarea(f"promo_vip:{f}", 12 * 60 <= mins <= 20 * 60, contenido.promo_financiera_vip)
     _tarea(f"promo_grupo:{f}", 13 * 60 <= mins <= 20 * 60, contenido.promo_financiera_grupo)
-    _tarea(f"recordatorio_vip_a:{f}", 12 * 60 <= mins <= 14 * 60, enviar_recordatorio_vip)
-    _tarea(f"recordatorio_vip_b:{f}", 15 * 60 + 30 <= mins <= 17 * 60 + 30, enviar_recordatorio_vip)
+    _tarea(f"recordatorio_vip_a:{f}", 12 * 60 <= mins <= 14 * 60, contenido.recordatorio_vip_free)
+    _tarea(f"recordatorio_vip_b:{f}", 15 * 60 + 30 <= mins <= 17 * 60 + 30, contenido.recordatorio_vip_free)
     _tarea(f"temporada_mes:{mes}", a.day <= 5 and 9 * 60 <= mins <= 18 * 60, contenido.temporada_inicio_mes)
     _tarea(f"temporada_sem_a:{sem}", dia == 1 and 11 * 60 <= mins <= 16 * 60, contenido.temporada_semana_free)
     _tarea(f"temporada_sem_b:{sem}", dia == 4 and 11 * 60 <= mins <= 16 * 60, contenido.temporada_semana_free)
