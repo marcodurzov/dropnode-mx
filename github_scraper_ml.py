@@ -536,8 +536,8 @@ def msg_vip(item, stats):
     if cupon and c_monto>0: m += f"\n🎟️ *Con cupón: ${p_cupon:,.0f} MXN* (−${c_monto:,.0f})\n"
     if stats.get("es_minimo") and stats.get("dias",0)>=7:
         m += f"\n*Precio más bajo en {stats['dias']} días*\n"
-    if stats.get("avg") and precio < stats["avg"]*0.90:
-        m += f"${stats['avg']-precio:,.0f} menos que el promedio\n"
+    if stats.get("avg") and precio < stats["avg"]*0.90 and stats.get("dias",0) >= 7:
+        m += f"✅ *Verificado con historial:* ${stats['avg']-precio:,.0f} abajo del promedio rastreado ({stats['dias']} días)\n"
     if stxt: m += f"\n{stxt}\n"
     if vida: m += f"{vida}\n"
     m += f"\n━━━━━━━━━━━\n📋 Score: {sc}/10 · {hora_det} MX\n━━━━━━━━━━━\n\n"
@@ -573,6 +573,7 @@ def msg_vip_caption(item, stats):
     if cupon and c_monto>0: m += f"🎟️ Con cupón: *${p_cupon:,.0f}*\n"
     if stxt: m += f"\n{stxt}\n"
     if vida: m += f"{vida}\n"
+    if stats.get("avg") and precio < stats["avg"]*0.90 and stats.get("dias",0) >= 7: m += "✅ Verificado con historial\n"
     m += f"\nScore: {sc}/10\n"
     if es_rev and p_orig>precio:
         m += f"💰 Reventa: ${rl:,.0f}–${rh:,.0f}\nGanancia: *+${rl-precio:,.0f}*\n"
@@ -586,7 +587,7 @@ def msg_vip_caption(item, stats):
 # ─────────────────────────────────────────────
 # PROCESAMIENTO
 # ─────────────────────────────────────────────
-_FUN = {"leidos": 0, "basura": 0, "sin_descuento": 0, "repetidos": 0, "publicables": 0}
+_FUN = {"leidos": 0, "basura": 0, "sin_descuento": 0, "descuento_falso": 0, "repetidos": 0, "publicables": 0}
 
 
 def procesar(prod_raw, pagina_es_flash=False):
@@ -612,10 +613,15 @@ def procesar(prod_raw, pagina_es_flash=False):
         if descuento < (0.05 if es_remate else 0.15): _FUN["sin_descuento"] += 1; return None
         pid=upsert_prod(link,nombre,"ML Ofertas",item_id)
         guardar_precio(pid,precio,p_orig or precio,stk or 0)
+        # Verificación contra el historial propio: si el precio de hoy es igual al de siempre, el "descuento" es falso
+        stats=get_stats(pid,precio)
+        hist_ok = bool(stats) and stats.get("dias",0) >= 7
+        if hist_ok and precio > stats["avg"]*0.97 and not (cupon and c_monto>0):
+            _FUN["descuento_falso"] += 1; return None
         sc=score(descuento,stk,precio,cupon,ev,es_flash)
+        if hist_ok and precio <= stats["avg"]*0.5: sc = max(sc, 8)          # error de precio verificado
         if not E.puede_publicar_pid(pid,sc,precio,"vip"): _FUN["repetidos"] += 1; return None   # política de repeticiones (estado.py)
         _FUN["publicables"] += 1
-        stats=get_stats(pid,precio)
         thumb_hd=thumb.replace("I.jpg","O.jpg") if thumb else ""
         return {"id":item_id,"pid":pid,"nombre":nombre,"precio":precio,
                 "precio_orig":p_orig or precio,"descuento":descuento,"stock":stk,
@@ -670,7 +676,7 @@ def main():
         # Sin proxy: 2 intentos directos. Con proxy: 1 directo (barato) y luego proxy con pocas páginas (se paga por GB).
         PAGINAS_PROXY = PAGINAS_BASE[:3]      # las páginas de /ofertas son las que cargan por proxy
         if NAV.proxy_cfg():
-            intentos = [(None, PAGINAS), (NAV.proxy_cfg(), PAGINAS_PROXY)]
+            intentos = [(NAV.proxy_cfg(), PAGINAS_PROXY), (NAV.proxy_cfg(), PAGINAS_PROXY)]   # IP rotativa: si falla, otra IP
         else:
             intentos = [(None, PAGINAS), (None, PAGINAS)]
         with sync_playwright() as pw:
@@ -759,7 +765,7 @@ def main():
     logger.info(f"[GITHUB v12] VIP:{vip_n} Excl:{len(ids_excl)} Cola free:{encolados} embudo={_FUN}")
     if total_scrapeado > 0 and vip_n == 0 and encolados == 0:
         E.admin_msg(f"ℹ️ ML ({fuente}): leí {_FUN['leidos']} productos pero no publiqué ninguno.\n"
-                    f"Sin descuento ≥15%: {_FUN['sin_descuento']} · accesorios/baratos: {_FUN['basura']} · "
+                    f"Sin descuento ≥15%: {_FUN['sin_descuento']} · descuento falso (precio de siempre): {_FUN['descuento_falso']} · accesorios/baratos: {_FUN['basura']} · "
                     f"ya publicados antes: {_FUN['repetidos']} · publicables: {_FUN['publicables']}",
                     clave=f"ml_embudo:{hoy}:{hora // 3}")
 
