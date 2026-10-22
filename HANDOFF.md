@@ -1,4 +1,4 @@
-[HANDOFF.md](https://github.com/user-attachments/files/33732818/HANDOFF.md)
+[HANDOFF.md](https://github.com/user-attachments/files/33837568/HANDOFF.md)
 # DropNode MX — HANDOFF (pega este archivo al inicio de una conversación nueva)
 
 > Mantén este archivo en la raíz del repo `marcodurzov/dropnode-mx` y en los archivos del Proyecto de Claude.
@@ -29,6 +29,14 @@ Regla no negociable: NUNCA mencionar automatización en público. Todo es "el eq
 - Amazon Associates cerró la cuenta `dropnodemx-20` (3 ventas en 180 días no cumplidas, oct-2026): los enlaces de Amazon ya no pagan comisión hasta reaplicar.
 - Comunidad con IA (Claude Haiku) opcional: secret `ANTHROPIC_API_KEY`; voz "el equipo"; si preguntan si es persona, responde que es el asistente virtual del equipo.
 - Comandos del dueño en privado con el bot: `/status`, `/oferta URL precio_ahora precio_antes nombre`.
+
+## Reglas añadidas el 21-oct-2026
+- Plata Card: 1ª promo diaria del free siempre Plata; 2ª Plata 3 de cada 4 días; Nu solo ocasional (`contenido._elegir`).
+- Free: descuento ≤ 40 %; "los descuentos de más del 40% son solo del VIP" aparece en alertas y recordatorios.
+- Cierres: el resumen FREE/VIP solo se publica si hubo ≥ 3 alertas (o un error de precio / ahorro ≥ $5,000 en el VIP) — `resumenes.MIN_ALERTAS_RESUMEN`. Balance mensual VIP los primeros días del mes.
+- ML: verificación contra historial propio (descuento falso si el precio es igual al promedio rastreado de ≥ 7 días; error de precio verificado si ≤ 50 % del promedio; insignia ✅ en el VIP).
+- Tiendas bloqueadas: navegador + proxy con tope de 16 páginas/día (`scraper_multi.PROXY_PAGINAS_DIA`). Candidatas nuevas: Best Buy, Office Depot, Home Depot, Cyberpuerta, Suburbia, Sanborns, Claro Shop (el diagnóstico dice cuáles sirven).
+- Disparadores externos (cron-job.org, POST a `.../actions/workflows/<archivo>.yml/dispatches` con `{"ref":"main"}`): uno para `bot.yml` cada 15 min y otro para `scraper_ml.yml` cada 30 min de 6:00 a 23:59 (hora México). El token vence el 16-oct-2027.
 
 ## Arquitectura
 - `bot.yml` (cada 15 min) → `main.py`: cola free, 2 fuentes por corrida, lectura/moderación del grupo, programados.
