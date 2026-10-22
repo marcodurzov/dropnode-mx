@@ -25,12 +25,14 @@ def _productos():
         return {}
 
 
-def _elegir(dia):
-    """Plata Card 2 de cada 3 días (es la que más le deja al dueño); Nu el resto."""
+def _elegir(dia, slot="a"):
+    """Plata Card casi siempre (es la que más le deja al dueño): en el free, la 1ª promo del día es SIEMPRE Plata
+    y la 2ª es Plata 3 de cada 4 días; Nu solo ocasionalmente."""
     prods = _productos()
-    if "Plata Card" in prods and (dia % 3 != 2 or "Nu" not in prods):
-        return prods["Plata Card"]
-    return prods.get("Nu") or (list(prods.values())[0] if prods else None)
+    plata, nu = prods.get("Plata Card"), prods.get("Nu")
+    if plata and (slot == "a" or dia % 4 != 3 or not nu):
+        return plata
+    return nu or plata or (list(prods.values())[0] if prods else None)
 
 
 PLATA_FREE = [
@@ -43,8 +45,8 @@ PLATA_FREE = [
 NU_FREE = ["💜 <b>Otra opción que recomendamos</b>\n\nNu: tarjeta de crédito sin anualidad y cuenta de débito, todo desde el celular."]
 
 
-def promo_financiera_free():
-    p = _elegir(H.ahora().day)
+def promo_financiera_free(slot="a"):
+    p = _elegir(H.ahora().day, slot)
     if not p:
         return False
     cuerpo = random.choice(PLATA_FREE if p["nombre"] == "Plata Card" else NU_FREE)
@@ -53,7 +55,7 @@ def promo_financiera_free():
 
 
 def promo_financiera_vip():
-    p = _elegir(H.ahora().day + 1)
+    p = _elegir(H.ahora().day + 1, "b")
     if not p:
         return False
     return bool(E.tg_send(E.cfg_int("CHANNEL_VIP_ID"),
@@ -62,12 +64,35 @@ def promo_financiera_vip():
 
 
 def promo_financiera_grupo():
-    p = _elegir(H.ahora().day)
+    p = _elegir(H.ahora().day, "b")
     if not p:
         return False
     return bool(E.tg_send(E.cfg_int("GROUP_ID"),
                           f"{p['emoji']} <b>Tip financiero</b>\n\n{E.esc(p['nombre'])}: {E.esc(p['descripcion'])}.\n\n"
                           f"{TRANSPARENCIA}", boton=(f"{p['emoji']} Más info", p["link"])))
+
+
+# ─────────────────────────────────────────────
+# Recordatorio del VIP en el free (solo afirmaciones que el servicio cumple de verdad)
+# ─────────────────────────────────────────────
+VIP_FREE = [
+    ("🔒 <b>Los descuentos de más del 40% son solo del Canal VIP</b>\n\n"
+     "Aquí publicamos ofertas de hasta 40%. Lo mejor se queda en el VIP, junto con los errores de precio y las alertas "
+     "desde las 6:30 AM.\n\n$299 MXN/mes · cancela cuando quieras"),
+    ("⭐ <b>Lo que incluye el Canal VIP</b>\n\n"
+     "• Alertas de 6:30 AM a 11:30 PM (y de madrugada si aparece un error de precio)\n"
+     "• Descuentos de más del 40% que no llegan a este canal\n"
+     "• Verificación contra el historial de precios\n"
+     "• Cierre diario con el ahorro del día\n"
+     "• Búsquedas que pide la comunidad\n\n$299 MXN/mes"),
+    ("💡 <b>Una sola compra a buen precio puede pagar el mes</b>\n\n"
+     "En el Canal VIP las ofertas llegan primero y con más descuento. Pruébalo y decide tú.\n\n$299 MXN/mes"),
+]
+
+
+def recordatorio_vip_free():
+    return bool(E.tg_send(E.cfg_int("CHANNEL_FREE_ID"), random.choice(VIP_FREE),
+                          boton=("📲 Canal VIP — $299/mes", E.cfg("LAUNCHPASS_LINK"))))
 
 
 # ─────────────────────────────────────────────
