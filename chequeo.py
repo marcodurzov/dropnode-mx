@@ -115,8 +115,8 @@ def correr():
         except Exception:
             pass
         ayer = (H.ahora() - timedelta(days=1)).strftime("%Y-%m-%d")
-        chk(E.evento_hecho(f"tp:resumen_vip:{ayer}"), f"Cierre VIP de ayer ({ayer}) publicado", "aviso")
-        chk(E.evento_hecho(f"tp:resumen_free:{ayer}"), f"Cierre FREE de ayer ({ayer}) publicado", "aviso")
+        chk(E.evento_hecho(f"tp:resumen_vip:{ayer}"), f"Cierre VIP de ayer ({ayer}) procesado (solo se publica si hubo algo importante)", "aviso")
+        chk(E.evento_hecho(f"tp:resumen_free:{ayer}"), f"Cierre FREE de ayer ({ayer}) procesado (solo se publica si hubo algo importante)", "aviso")
         s = E.salud_fuentes(24)
         vivas = sorted(n for n, (c, ok, tot) in s.items() if ok > 0)
         muertas = sorted(n for n, (c, ok, tot) in s.items() if ok == 0)
