@@ -15,6 +15,7 @@ import horarios as H
 import temporada_calendario as T
 
 logger = logging.getLogger(__name__)
+MIN_ALERTAS_RESUMEN = 3      # el cierre solo se publica si hubo algo que valga la pena
 BTN_VIP = lambda: ("📲 Canal VIP — $299/mes", E.cfg("LAUNCHPASS_LINK"))
 
 
@@ -77,7 +78,9 @@ def _unicos(filas):
 NOMBRE_TIENDA = {"mercadolibre": "Mercado Libre", "sams": "Sam's", "palacio": "Palacio de Hierro",
                  "heb": "HEB", "bodega": "Bodega Aurrerá", "amazon": "Amazon", "elektra": "Elektra",
                  "costco": "Costco", "walmart": "Walmart", "liverpool": "Liverpool",
-                 "coppel": "Coppel", "sears": "Sears", "petco": "Petco", "tiktok_trend": "Tendencias"}
+                 "coppel": "Coppel", "sears": "Sears", "petco": "Petco", "tiktok_trend": "Tendencias",
+                 "bestbuy": "Best Buy", "officedepot": "Office Depot", "homedepot": "Home Depot",
+                 "cyberpuerta": "Cyberpuerta", "suburbia": "Suburbia", "sanborns": "Sanborns", "claroshop": "Claro Shop"}
 
 
 def _tienda(t):
@@ -102,8 +105,9 @@ def resumen_free():
     # Solo lo que ya tiene más de 1 hora publicado (coherente con la ventana VIP->Free)
     corte = ahora - timedelta(minutes=H.VENTAJA_VIP_MIN)
     elegibles = _unicos([f for f in filas if f["hora"] and f["hora"] <= corte])
-    if not elegibles:
-        return False
+    if len(elegibles) < MIN_ALERTAS_RESUMEN:                # poco que contar: no se publica
+        logger.info(f"[RESUMEN FREE] omitido ({len(elegibles)} < {MIN_ALERTAS_RESUMEN})")
+        return None
     ordenadas = sorted(elegibles, key=lambda f: f["desc"], reverse=True)
     top, cont = [], {}
     for f in ordenadas:                                   # 1ª pasada: máx. 2 por tienda (variedad)
@@ -128,7 +132,7 @@ def resumen_free():
     if ahorro > 500:
         m += f"💰 Ahorro acumulado hoy en el VIP: <b>~{_mxn(ahorro)} MXN</b>\n"
     m += "\n<i>Las 🔴 llegan al VIP primero; los errores de precio (🚨) se quedan solo allá.</i>\n"
-    m += "<i>El VIP arranca desde las 6:30 AM y, si aparece un error de precio, también de madrugada.</i>"
+    m += "<i>Los descuentos de más del 40% se quedan en el VIP, que además arranca desde las 6:30 AM.</i>"
     return bool(E.tg_send(E.cfg_int("CHANNEL_FREE_ID"), m, boton=BTN_VIP()))
 
 
@@ -165,17 +169,17 @@ def resumen_vip():
     filas = _cargar_dia(H.dia_inicio_utc(ahora))
     vip = _unicos([f for f in filas if f["canal"] == "vip"])
     if not vip:
-        E.tg_send(E.cfg_int("CHANNEL_VIP_ID"),
-                  f"📊 <b>Cierre del día — {H.fecha_larga(ahora)}</b>\n\n"
-                  "Hoy el equipo revisó todo y no apareció nada que valiera la pena publicar. "
-                  "Preferimos no publicar a publicar ruido.\n\n"
-                  "🌙 Esta noche solo avisamos si aparece un error de precio (score 8+).")
         _guardar_hist(hoy, 0, 0, 0, "")
-        return True
+        logger.info("[RESUMEN VIP] omitido (sin alertas hoy)")
+        return None
 
     ahorro = sum(f["original"] - f["precio"] for f in vip)
     gasto = sum(f["precio"] for f in vip)
     errores = [f for f in vip if f["score"] >= 8]
+    if len(vip) < MIN_ALERTAS_RESUMEN and not errores and ahorro < 5000:     # nada importante: no se publica
+        _guardar_hist(hoy, ahorro, len(vip), len(errores), "")
+        logger.info("[RESUMEN VIP] omitido (poco movimiento)")
+        return None
     noct = [f for f in vip if f["hora"] and (H.VIP_FIN // 60 <= f["hora"].hour or f["hora"].hour < 6
                                               or (f["hora"].hour == 6 and f["hora"].minute < 30))]
     mejor_desc = max(vip, key=lambda f: f["desc"])
@@ -283,5 +287,37 @@ def texto_status():
     m += f"Alertas últimas 24 h: VIP <b>{vip}</b> · Free <b>{free}</b>\n"
     m += f"Corridas de fuentes (24 h): <b>{corridas}</b> (esperadas ~190; si son muy pocas GitHub está saltando corridas)\n"
     m += "Con productos: " + (", ".join(vivas) or "ninguna") + "\n"
-    m += "Sin productos: " + (", ".join(muertas) or "—")
+    m += "Sin productos: " + (", ".join(muertas) or "—") + "\n"
+    ayer = (ahora - timedelta(days=1)).strftime("%Y-%m-%d")
+    m += (f"Cierre VIP de ayer ({ayer}): {'✅ procesado' if E.evento_hecho(f'tp:resumen_vip:{ayer}') else '⏳ no corrió'} · "
+          f"Cierre FREE: {'✅ procesado' if E.evento_hecho(f'tp:resumen_free:{ayer}') else '⏳ no corrió'}")
     return m
+
+
+def resumen_mensual_vip():
+    """Primeros días del mes: balance del mes anterior (suma de descuentos publicados)."""
+    db = E.get_db()
+    if not db:
+        return False
+    a = H.ahora()
+    ini_mes = a.replace(day=1)
+    fin_ant = ini_mes - timedelta(days=1)
+    ini_ant = fin_ant.replace(day=1)
+    try:
+        rows = E.fetch_all(lambda: db.table("resumenes_hist").select("*")
+                           .gte("fecha", ini_ant.strftime("%Y-%m-%d")).lte("fecha", fin_ant.strftime("%Y-%m-%d")))
+    except Exception:
+        return False
+    n = sum(int(x["n_alertas"] or 0) for x in rows)
+    if n < 10:
+        return None
+    tot = sum(float(x["ahorro"] or 0) for x in rows)
+    err = sum(int(x["errores"] or 0) for x in rows)
+    veces = tot / 299 if tot else 0
+    m = f"📆 <b>Balance de {H.MESES[ini_ant.month - 1]} — Canal VIP</b>\n\n"
+    m += f"• Alertas publicadas: <b>{n}</b> · 🚨 errores de precio: <b>{err}</b>\n"
+    m += f"• Suma de los descuentos publicados: <b>{_mxn(tot)} MXN</b>\n"
+    if veces >= 1:
+        m += f"  (equivale a <b>{veces:.0f} veces</b> el costo mensual del VIP)\n"
+    m += "\n<i>Es la suma del ahorro de todas las ofertas publicadas frente a su precio normal; lo que ahorra cada miembro depende de lo que compre.</i>"
+    return bool(E.tg_send(E.cfg_int("CHANNEL_VIP_ID"), m))
