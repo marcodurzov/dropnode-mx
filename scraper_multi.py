@@ -123,7 +123,9 @@ def _intento(s, url, referer, proxies=None):
         return "", 0, f"ERROR {str(e)[:80]}"
 
 
-PROXY_PAGINAS_DIA = 16        # tope de páginas de tiendas que pueden pasar por el navegador+proxy cada día
+PROXY_PAGINAS_DIA = 16
+PROXY_POR_TIENDA = 2          # páginas por corrida que una tienda puede gastar por el navegador+proxy
+_PROXY_CTX = {"restantes": PROXY_POR_TIENDA}        # tope de páginas de tiendas que pueden pasar por el navegador+proxy cada día
 
 
 def _proxy_permitido():
@@ -141,6 +143,21 @@ def _proxy_permitido():
     return False
 
 
+def _tienda_merece_proxy(nombre_t):
+    """No gastar GB en tiendas que llevan 2+ corridas sin dar un solo producto en 24 h (la diagnóstica sí puede)."""
+    if os.environ.get("PROXY_SIN_TOPE") == "1":
+        return True
+    try:
+        import estado as E
+        pref = nombre_t.lower().split()[0][:5]
+        for k, (c, ok, _t) in E.salud_fuentes(24).items():
+            if k.lower().startswith(pref) and c >= 2 and ok == 0:
+                return False
+    except Exception:
+        pass
+    return True
+
+
 def _fetch_navegador_proxy(url):
     """(html, status, nota) abriendo la página con Chromium POR EL PROXY (sin imágenes/CSS)."""
     if os.environ.get("RENDER_JS", "1") != "1":
@@ -150,9 +167,12 @@ def _fetch_navegador_proxy(url):
         proxy = NAV.proxy_cfg()
         if not proxy:
             return "", 0, "sin proxy"
+        if _PROXY_CTX["restantes"] <= 0:
+            return "", 0, "límite por tienda"
         if not _proxy_permitido():
             return "", 0, "tope diario de proxy"
         from playwright.sync_api import sync_playwright
+        _PROXY_CTX["restantes"] -= 1
         with sync_playwright() as pw:
             b, page = NAV.lanzar(pw, proxy=proxy)
             page.goto(url, wait_until="domcontentloaded", timeout=40000)
@@ -275,6 +295,17 @@ def _walk_json(o, out, prof=0):
         nombre = _val(o, _K_NOMBRE)
         precio = _precio(_val(o, _K_PRECIO))
         orig = _precio(_val(o, _K_ORIG))
+        pr = o.get("price")
+        if isinstance(pr, dict) and "discountedPrice" in pr and "salesPrice" in pr:       # Coppel
+            precio, orig = _precio(pr["discountedPrice"]), _precio(pr["salesPrice"])
+        pi = o.get("priceInfo")
+        if isinstance(pi, dict):                                                           # Walmart / Bodega / Sam's
+            cur = pi.get("currentPrice")
+            cur = cur.get("price") if isinstance(cur, dict) else cur
+            was = pi.get("wasPrice") or pi.get("listPrice")
+            was = was.get("price") if isinstance(was, dict) else was
+            if cur:
+                precio, orig = _precio(cur), _precio(was)
         if isinstance(nombre, str) and len(nombre) > 4 and precio > 0 and orig > precio:
             out.append({"nombre": nombre, "precio": precio, "orig": orig,
                         "url": str(_val(o, _K_URL) or ""), "thumb": str(_val(o, _K_IMG) or "")})
@@ -387,11 +418,26 @@ def extraer_html(soup, base):
                 precios.append(v)
         if not precios:
             continue
-        pcts = [int(x) for x in re.findall(r"(\d{1,2})\s*%", nodo.get_text(" ", strip=True)) if 5 <= int(x) <= 90]
-        if pcts:      # el precio correcto es el que coincide con el % de descuento que muestra la tarjeta
-            precio = min(precios, key=lambda p: min(abs((orig - p) / orig * 100 - q) for q in pcts))
-        else:
-            precio = max(precios)
+        texto_nodo = nodo.get_text(" ", strip=True)
+        pcts = [int(x) for x in re.findall(r"(\d{1,2})\s*%", texto_nodo) if 5 <= int(x) <= 90]
+        ahorros = [_precio(x) for x in re.findall(r"[Aa]horr[oa]\w*\s*:?\s*\$\s?([\d.,]+)", texto_nodo)]
+        ahorro_ok, precio = False, None
+        for a in ahorros:                       # evidencia fuerte: precio + ahorro = precio anterior
+            for p in precios:
+                if abs((orig - p) - a) <= max(1.0, 0.01 * orig):
+                    precio, ahorro_ok = p, True
+                    break
+            if ahorro_ok:
+                break
+        if not ahorro_ok and ahorros:           # Costco: el precio final no aparece como candidato
+            a = max(ahorros)
+            if 0.05 * orig <= a <= 0.7 * orig:
+                precio, ahorro_ok = orig - a, True
+        if precio is None:
+            if pcts:      # el precio correcto es el que coincide con el % de descuento que muestra la tarjeta
+                precio = min(precios, key=lambda p: min(abs((orig - p) / orig * 100 - q) for q in pcts))
+            else:
+                precio = max(precios)
         a = nodo.find("a", href=True)
         img = nodo.find("img")
         nombre = ""
@@ -408,7 +454,7 @@ def extraer_html(soup, base):
         if len(nombre) > 4 and url and clave not in vistos:
             vistos.add(clave)
             thumb = (img.get("src") or img.get("data-src") or "") if img else ""
-            res.append({"nombre": nombre, "precio": precio, "orig": orig, "url": url, "thumb": thumb, "pcts": pcts})
+            res.append({"nombre": nombre, "precio": precio, "orig": orig, "url": url, "thumb": thumb, "pcts": pcts, "ahorro_ok": ahorro_ok})
     return res
 
 
@@ -511,10 +557,11 @@ def _a_item(clave, r, estrategia="", razones=None):
     tope = MAX_DESC_HTML if estrategia == "html" else MAX_DESC
     if estrategia == "html":                        # la heurística HTML exige evidencia: un % visible que cuadre con los precios
         pcts = r.get("pcts") or []
-        if not pcts:
-            return no("sin_porcentaje_visible")
-        if not any(abs(q - desc * 100) <= 4 for q in pcts):
-            return no("porcentaje_no_coincide")
+        if not r.get("ahorro_ok"):
+            if not pcts:
+                return no("sin_porcentaje_visible")
+            if not any(abs(q - desc * 100) <= 4 for q in pcts):
+                return no("porcentaje_no_coincide")
     if desc < MIN_DESC:
         return no("descuento_menor_15")
     if desc > tope:
@@ -575,6 +622,7 @@ def scrapear_tienda(clave, diag=None, max_paginas=4, muestras_dir=None):
     if clave not in TIENDAS:
         return []
     nombre_t, _, base, rutas, vtex = TIENDAS[clave]
+    _PROXY_CTX["restantes"] = PROXY_POR_TIENDA if _tienda_merece_proxy(nombre_t) else 0
     s = _sesion()
     crudos, paginas, descubiertas = [], [], []
     detalle = {"paginas": [], "estrategias": {}}
