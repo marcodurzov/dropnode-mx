@@ -1,4 +1,4 @@
-[HANDOFF.md](https://github.com/user-attachments/files/33837568/HANDOFF.md)
+[HANDOFF.md](https://github.com/user-attachments/files/33979797/HANDOFF.md)
 # DropNode MX — HANDOFF (pega este archivo al inicio de una conversación nueva)
 
 > Mantén este archivo en la raíz del repo `marcodurzov/dropnode-mx` y en los archivos del Proyecto de Claude.
@@ -37,6 +37,12 @@ Regla no negociable: NUNCA mencionar automatización en público. Todo es "el eq
 - ML: verificación contra historial propio (descuento falso si el precio es igual al promedio rastreado de ≥ 7 días; error de precio verificado si ≤ 50 % del promedio; insignia ✅ en el VIP).
 - Tiendas bloqueadas: navegador + proxy con tope de 16 páginas/día (`scraper_multi.PROXY_PAGINAS_DIA`). Candidatas nuevas: Best Buy, Office Depot, Home Depot, Cyberpuerta, Suburbia, Sanborns, Claro Shop (el diagnóstico dice cuáles sirven).
 - Disparadores externos (cron-job.org, POST a `.../actions/workflows/<archivo>.yml/dispatches` con `{"ref":"main"}`): uno para `bot.yml` cada 15 min y otro para `scraper_ml.yml` cada 30 min de 6:00 a 23:59 (hora México). El token vence el 16-oct-2027.
+
+## Hallazgos con muestras reales (22-oct-2026)
+- Coppel: `__NEXT_DATA__` con `price.discountedPrice/salesPrice` (29 ofertas reales en la muestra). Bodega/Walmart: `priceInfo.currentPrice/wasPrice`. Sam's: tarjetas con "precio actual $X · Antes $Y · Ahorra $Z" (se valida precio + ahorro = antes). Elektra renderizado: tarjetas con % visible. Estos extractores ya viven en `scraper_multi.py`.
+- Sin datos útiles aún: Costco, Liverpool, Suburbia, Amazon, Sears (las muestras guardan solo la primera página; hace falta una página de listado/ofertas de cada una).
+- ML por proxy: `/ofertas?page=1` a veces llega vacía (0), las páginas 2 y 3 traen 48 tarjetas cada una. El filtro de historial descarta ~40 % de lo leído (precio igual al de siempre) y es lo esperado.
+- Proxy de tiendas: máx. 2 páginas por tienda por corrida y 16 por día; no se gasta en tiendas con 2+ corridas sin productos.
 
 ## Arquitectura
 - `bot.yml` (cada 15 min) → `main.py`: cola free, 2 fuentes por corrida, lectura/moderación del grupo, programados.
