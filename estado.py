@@ -174,8 +174,9 @@ def tg_send(chat_id, texto, boton=None, parse_mode="HTML", foto=None, reply_to=N
     """Devuelve message_id o None. boton = (texto, url)."""
     if not chat_id or not TELEGRAM_TOKEN:
         return None
-    payload = {"chat_id": chat_id, "parse_mode": parse_mode,
-               "disable_web_page_preview": True}
+    payload = {"chat_id": chat_id, "disable_web_page_preview": True}
+    if parse_mode:
+        payload["parse_mode"] = parse_mode
     if boton and boton[1]:
         payload["reply_markup"] = {"inline_keyboard": [[{"text": boton[0], "url": boton[1]}]]}
     if reply_to:
@@ -499,3 +500,80 @@ def salud_fuentes(horas=24):
         return out
     except Exception:
         return {}
+
+
+# ─────────────────────────────────────────────
+# Cola VIP (ráfagas) — tabla cola_vip
+# ─────────────────────────────────────────────
+def cola_vip_agregar(payload, score):
+    """True si quedó en la cola; False si la tabla no existe o la BD falla (el llamador publica directo)."""
+    db = get_db()
+    if not db:
+        return False
+    try:
+        db.table("cola_vip").insert({"payload": payload, "score": score, "enviado": False}).execute()
+        return True
+    except Exception as e:
+        logger.warning(f"[COLA VIP] {str(e)[:100]}")
+        return False
+
+
+def cola_vip_listos(limite=400):
+    db = get_db()
+    if not db:
+        return []
+    try:
+        r = db.table("cola_vip").select("*").eq("enviado", False) \
+            .order("score", desc=True).order("id").limit(limite).execute()
+        return r.data or []
+    except Exception as e:
+        logger.warning(f"[COLA VIP] leer: {str(e)[:100]}")
+        return []
+
+
+def cola_vip_marcar(ids):
+    db = get_db()
+    if not db or not ids:
+        return
+    try:
+        db.table("cola_vip").update({"enviado": True}).in_("id", ids).execute()
+    except Exception:
+        pass
+
+
+def cola_vip_limpiar(horas=5):
+    db = get_db()
+    if not db:
+        return
+    try:
+        limite = (datetime.utcnow() - timedelta(hours=horas)).isoformat()
+        db.table("cola_vip").delete().eq("enviado", False).lt("created_at", limite).execute()
+        db.table("cola_vip").delete().eq("enviado", True).lt("created_at", (datetime.utcnow() - timedelta(days=2)).isoformat()).execute()
+    except Exception:
+        pass
+
+
+def guardar_alerta_pid(pid, score, canal, precio, descuento, msg_id=None):
+    db = get_db()
+    if not db or not pid:
+        return
+    try:
+        db.table("alertas_enviadas").insert({
+            "producto_id": pid, "heat_score": score, "canal": canal, "precio_alerta": precio,
+            "descuento_real": descuento, "telegram_msg_id": msg_id, "clicks": 0,
+            "timestamp": datetime.utcnow().isoformat()}).execute()
+    except Exception as e:
+        logger.warning(f"[ALERTA] {e}")
+
+
+def enviar_payload(chat_id, p):
+    """Envía un mensaje ya formateado: foto+pie si hay foto, texto si no; y sin formato si Telegram rechaza el formato."""
+    modo = p.get("modo") or None
+    foto = p.get("foto") if str(p.get("foto") or "").startswith("http") else None
+    texto = p.get("texto") or ""
+    caption = p.get("caption") or texto[:1024]
+    mid = tg_send(chat_id, caption if foto else texto, parse_mode=modo, foto=foto)
+    if not mid and modo:
+        plano = re.sub(r"[*_`\[\]]", "", texto)
+        mid = tg_send(chat_id, plano, parse_mode=None)
+    return mid
