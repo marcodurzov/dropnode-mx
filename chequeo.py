@@ -15,7 +15,7 @@ import horarios as H
 
 TABLAS = ["productos", "historial_precios", "alertas_enviadas", "cola_free", "peticiones",
           "eventos_enviados", "resumenes_hist", "fuentes_log", "comunidad_posts", "comunidad_msgs",
-          "comunidad_advertencias", "alertas_temporada", "cupones_publicados"]
+          "comunidad_advertencias", "alertas_temporada", "cupones_publicados", "cola_vip"]
 
 
 def _tg(metodo, **params):
