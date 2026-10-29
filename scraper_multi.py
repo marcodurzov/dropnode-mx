@@ -35,7 +35,8 @@ MAX_DESC_HTML = 0.75        # la heurística HTML se equivoca más: tope más es
 # clave: (nombre visible, emoji, base, [urls de ofertas/home], vtex?)
 TIENDAS = {
     "liverpool": ("Liverpool", "🏬", "https://www.liverpool.com.mx",
-                  ["/tienda/home", "/tienda/ofertas-y-promociones", "/tienda/liquidacion"], False),
+                  ["/tienda/outlet-liverpool/catst64328565", "/tienda/bolsas/catst4003077",
+                   "/tienda/laptop-y-monitores-gamer/catst6051", "/tienda/home"], False),
     "palacio":   ("Palacio de Hierro", "💎", "https://www.elpalaciodehierro.com",
                   ["/", "/outlet", "/ofertas"], True),
     "costco":    ("Costco", "🏪", "https://www.costco.com.mx",
@@ -70,6 +71,17 @@ TIENDAS = {
                   ["/", "/ofertas"], False),
     "claroshop": ("Claro Shop", "🛒", "https://www.claroshop.com",
                   ["/", "/ofertas"], False),
+    # moda y calzado de primera línea (bolsas, tenis, zapatos): el diagnóstico dirá cuáles dan productos
+    "innovasport": ("Innovasport", "👟", "https://www.innovasport.com",
+                  ["/", "/sale"], True),
+    "dportenis": ("Dportenis", "👟", "https://www.dportenis.mx",
+                  ["/", "/ofertas"], False),
+    "puma":      ("Puma", "🐆", "https://mx.puma.com",
+                  ["/", "/sale"], False),
+    "skechers":  ("Skechers", "👟", "https://www.skechers.mx",
+                  ["/", "/sale"], False),
+    "priceshoes": ("Price Shoes", "👠", "https://www.priceshoes.com",
+                  ["/", "/ofertas"], True),
 }
 PALABRAS_OFERTA = ["oferta", "sale", "rebaja", "outlet", "promo", "descuento", "liquida", "hot-sale",
                    "buen-fin", "remate", "deals", "goldbox", "especial"]
