@@ -80,7 +80,8 @@ NOMBRE_TIENDA = {"mercadolibre": "Mercado Libre", "sams": "Sam's", "palacio": "P
                  "costco": "Costco", "walmart": "Walmart", "liverpool": "Liverpool",
                  "coppel": "Coppel", "sears": "Sears", "petco": "Petco", "tiktok_trend": "Tendencias",
                  "bestbuy": "Best Buy", "officedepot": "Office Depot", "homedepot": "Home Depot",
-                 "cyberpuerta": "Cyberpuerta", "suburbia": "Suburbia", "sanborns": "Sanborns", "claroshop": "Claro Shop"}
+                 "cyberpuerta": "Cyberpuerta", "suburbia": "Suburbia", "sanborns": "Sanborns", "claroshop": "Claro Shop",
+                 "innovasport": "Innovasport", "dportenis": "Dportenis", "puma": "Puma", "skechers": "Skechers", "priceshoes": "Price Shoes"}
 
 
 def _tienda(t):
@@ -286,6 +287,13 @@ def texto_status():
     m = f"🩺 <b>Estado — {H.fecha_larga(ahora)} {ahora.strftime('%H:%M')}</b>\n\n"
     m += f"Alertas últimas 24 h: VIP <b>{vip}</b> · Free <b>{free}</b>\n"
     m += f"Corridas de fuentes (24 h): <b>{corridas}</b> (esperadas ~190; si son muy pocas GitHub está saltando corridas)\n"
+    try:
+        db = E.get_db()
+        pend = db.table("cola_vip").select("id", count="exact").eq("enviado", False).execute().count if db else None
+        if pend is not None:
+            m += f"Cola VIP (por publicar): <b>{pend}</b>\n"
+    except Exception:
+        m += "Cola VIP: ⚠️ no disponible (¿falta crear la tabla cola_vip?)\n"
     m += "Con productos: " + (", ".join(vivas) or "ninguna") + "\n"
     m += "Sin productos: " + (", ".join(muertas) or "—") + "\n"
     ayer = (ahora - timedelta(days=1)).strftime("%Y-%m-%d")
