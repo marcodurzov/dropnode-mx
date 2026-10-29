@@ -1,5 +1,5 @@
 # =============================================================
-# DROPNODE MX — main.py v3.8
+# DROPNODE MX — main.py v3.9
 # GitHub Actions cada 15 min. Cambios vs v3.5:
 #   - Horarios/reglas centralizados (horarios.py)
 #   - Cola VIP->Free de 60 min (TODO el free sale de aquí, también ML)
@@ -11,8 +11,8 @@
 #   - Comunidad: lectura/moderación del grupo en cada corrida
 #   - Salud de fuentes y alertas privadas al dueño (ADMIN_CHAT_ID)
 # =============================================================
-import logging, sys, time, os, random, importlib
-from datetime import datetime
+import logging, sys, time, os, random, importlib, math
+from datetime import datetime, timedelta
 
 logging.basicConfig(level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
@@ -85,11 +85,12 @@ BTN_VIP = ("📲 Canal VIP — $299/mes", LAUNCHPASS_LINK)
 # ─────────────────────────────────────────────
 # FORMATO (HTML: los nombres con _ * [ ya no rompen el mensaje)
 # ─────────────────────────────────────────────
-EMOJIS = {"walmart": "🛒", "liverpool": "🏬", "coppel": "🏪", "amazon": "📦", "aliexpress": "🌐", "shein": "👗",
+EMOJIS = {"innovasport": "👟", "dportenis": "👟", "puma": "🐆", "skechers": "👟", "priceshoes": "👠", "walmart": "🛒", "liverpool": "🏬", "coppel": "🏪", "amazon": "📦", "aliexpress": "🌐", "shein": "👗",
           "costco": "🏪", "sams": "🏬", "petco": "🐾", "sears": "🏬", "palacio": "💎", "zara": "👗",
           "pullbear": "👕", "bershka": "👕", "lefties": "👕", "samsung": "📱", "lg": "📺", "sony": "🎮",
           "mercadolibre": "🛒", "tiktok_trend": "🎵", "elektra": "⚡", "bodega": "🛒", "heb": "🛒"}
-NOMBRES = {"bestbuy": "Best Buy", "officedepot": "Office Depot", "homedepot": "Home Depot", "claroshop": "Claro Shop",
+NOMBRES = {"innovasport": "Innovasport", "dportenis": "Dportenis", "puma": "Puma", "skechers": "Skechers",
+           "priceshoes": "Price Shoes", "bestbuy": "Best Buy", "officedepot": "Office Depot", "homedepot": "Home Depot", "claroshop": "Claro Shop",
            "cyberpuerta": "Cyberpuerta", "suburbia": "Suburbia", "sanborns": "Sanborns", "sams": "Sam's Club", "palacio": "Palacio de Hierro", "pullbear": "Pull&Bear", "mercadolibre": "Mercado Libre",
            "tiktok_trend": "Trending", "elektra": "Elektra", "bodega": "Bodega Aurrerá", "heb": "HEB"}
 
@@ -140,16 +141,83 @@ def fmt_free(item):
 
 
 # ─────────────────────────────────────────────
+# COLA VIP  (ráfagas a lo largo del día)
+# ─────────────────────────────────────────────
+def procesar_cola_vip():
+    """Suelta en el VIP lo acumulado en la cola: pocas piezas si hay poco, ráfagas más grandes si hay mucho,
+    repartido entre las corridas que quedan del día. De madrugada solo score >= 8 (máx. 3 por corrida)."""
+    a = H.ahora()
+    E.cola_vip_limpiar(H.VIP_TTL_HORAS)
+    pendientes = E.cola_vip_listos()
+    if not pendientes:
+        logger.info("[COLA VIP] vacía")
+        return
+    ya = E.contar_alertas("vip", H.dia_inicio_utc())
+    resto_dia = H.VIP_MAX_POR_DIA - ya
+    if resto_dia <= 0:
+        logger.info(f"[COLA VIP] tope diario alcanzado ({ya})")
+        return
+    en_vip = H.en_horario_vip(a)
+    elegibles = [p for p in pendientes if en_vip or float(p.get("score") or 0) >= H.SCORE_NOCTURNO]
+    if not elegibles:
+        logger.info(f"[COLA VIP] {len(pendientes)} en espera (fuera de horario, solo score >= {H.SCORE_NOCTURNO})")
+        return
+    mins_ahora = a.hour * 60 + a.minute
+    corridas_restantes = max(1, (H.VIP_FIN - mins_ahora) // 15) if en_vip else 1
+    base = math.ceil(len(elegibles) / corridas_restantes)
+    tam = random.choice([base, base, base + 2, base * 3])                 # ráfagas de tamaño variable
+    tam = max(1, min(H.VIP_LOTE_MAX, tam, len(elegibles), resto_dia))
+    if not en_vip:
+        tam = min(tam, 3)
+    enviados, excl, inicio = [], 0, time.time()
+    for fila in elegibles[:tam]:
+        if time.time() - inicio > 600:                                   # no pasarse del tiempo de la corrida
+            break
+        p = fila.get("payload") or {}
+        mid = E.enviar_payload(VIP, p)
+        if not mid:
+            continue
+        enviados.append(fila["id"])
+        score = float(p.get("score") or fila.get("score") or 0)
+        if p.get("pid"):
+            E.guardar_alerta_pid(p["pid"], score, "vip", p.get("precio"), p.get("descuento"), mid)
+        elif p.get("item"):
+            E.registrar_publicacion(p["item"], "vip", score, mid)
+        if p.get("es_excl"):
+            excl += 1
+        if p.get("item") and H.puede_pasar_al_free(float(p.get("descuento") or 0), score, bool(p["item"].get("es_flash"))):
+            E.cola_agregar(p["item"], score, len(enviados), delay_min=H.VENTAJA_VIP_MIN)     # al free, 1 h después
+        mk = E.cfg("MAKE_WEBHOOK_URL")
+        if score >= 8 and mk and p.get("make"):
+            try:
+                import requests as _rq
+                _rq.post(mk, json=p["make"], timeout=10)
+            except Exception:
+                pass
+        time.sleep(3.5)                                                   # Telegram: ~20 mensajes/min por chat
+    E.cola_vip_marcar(enviados)
+    if excl:
+        fomo_vip_al_free(excl)
+    logger.info(f"[COLA VIP] enviados={len(enviados)}/{tam} · en cola={len(pendientes) - len(enviados)} · hoy={ya + len(enviados)}")
+
+
+# ─────────────────────────────────────────────
 # COLA FREE  (60 min, solo horario free, con variedad)
 # ─────────────────────────────────────────────
 def procesar_cola_free():
     if not H.en_horario_free():
         logger.info("[COLA FREE] fuera de horario (8:00-19:00)")
         return
-    ya = E.contar_alertas("free", H.dia_inicio_utc())
-    cupo = min(H.FREE_MAX_POR_CORRIDA, H.FREE_MAX_POR_DIA - ya)
+    a = H.ahora()
+    if a.minute % 30 >= 15:
+        logger.info("[COLA FREE] fuera de tanda (se publica en los minutos 0-14 y 30-44)")
+        return
+    ya_dia = E.contar_alertas("free", H.dia_inicio_utc())
+    ya_hora = E.contar_alertas("free", datetime.utcnow() - timedelta(minutes=60))
+    cupo = min(H.FREE_LOTE_MAX, H.FREE_MAX_POR_HORA - ya_hora, H.FREE_MAX_POR_DIA - ya_dia)
+    ya = ya_dia
     if cupo <= 0:
-        logger.info(f"[COLA FREE] tope diario alcanzado ({ya})")
+        logger.info(f"[COLA FREE] tope alcanzado (hora {ya_hora}, día {ya_dia})")
         return
     listos = E.cola_listos()
     E.cola_limpiar()
@@ -226,6 +294,11 @@ SCRAPERS = [
     ("Suburbia",       _multi("suburbia"), 2),
     ("Sanborns",       _multi("sanborns"), 2),
     ("Claro Shop",     _multi("claroshop"), 2),
+    ("Innovasport",    _multi("innovasport"), 2),
+    ("Dportenis",      _multi("dportenis"), 2),
+    ("Puma",           _multi("puma"), 2),
+    ("Skechers",       _multi("skechers"), 2),
+    ("Price Shoes",    _multi("priceshoes"), 2),
     ("Petco API",      ciclo_petco_a, 1),
     ("Inditex",        ciclo_inditex, 1),
     ("Marcas Directo", ciclo_marcas_d, 1),
@@ -279,24 +352,38 @@ def _correr_fuente(nombre, func):
                 verificar_match(item["nombre"], item["url"], item["precio_actual"], item["descuento"])
             except Exception:
                 pass
-            # ── VIP ──
-            if sf >= 5 and vip_n < 2 and H.vip_puede_publicar(sf) and E.puede_publicar_item(item, sf, "vip"):
-                mid = E.tg_send(VIP, fmt_vip(item, sf),
-                                foto=item["thumbnail"] if item["thumbnail"].startswith("http") else None)
-                if mid:
+            # ── VIP: a la cola (sale en ráfagas); si la cola no existe, se publica directo como antes ──
+            en_cola = False
+            if sf >= 5 and H.vip_puede_publicar(sf) and E.puede_publicar_item(item, sf, "vip"):
+                thumb = item["thumbnail"] if item["thumbnail"].startswith("http") else ""
+                payload = {"modo": "HTML", "texto": fmt_vip(item, sf), "foto": thumb, "score": sf, "pid": None,
+                           "precio": item["precio_actual"], "descuento": item["descuento"],
+                           "es_excl": H.es_exclusivo(item["descuento"], sf, item["es_flash"]),
+                           "item": {**item, "en_vip": True},
+                           "make": {"nombre": item["nombre"][:80], "precio": str(round(item["precio_actual"])),
+                                    "descuento": str(round(item["descuento"] * 100)), "thumbnail": thumb,
+                                    "link": item["url"], "score": sf, "es_flash": item["es_flash"]}}
+                if E.cola_vip_agregar(payload, sf):
                     vip_n += 1
-                    item["en_vip"] = True
-                    E.registrar_publicacion(item, "vip", sf, mid)
-                    time.sleep(3)
-            # ── Cola hacia el free (60 min) ──
-            if H.puede_pasar_al_free(item["descuento"], sf, item["es_flash"]):
+                    en_cola = True
+                elif vip_n < 2:
+                    mid = E.tg_send(VIP, fmt_vip(item, sf), foto=thumb or None)
+                    if mid:
+                        vip_n += 1
+                        item["en_vip"] = True
+                        E.registrar_publicacion(item, "vip", sf, mid)
+                        time.sleep(3)
+                        if H.puede_pasar_al_free(item["descuento"], sf, item["es_flash"]):
+                            if E.reclamar_evento(f"cola:{item['tienda']}:{item['sku']}:{hoy}", fallback=True):
+                                E.cola_agregar(item, sf, vip_n, delay_min=H.VENTAJA_VIP_MIN)
+                        en_cola = True
+            # ── Ofertas que no llegan al VIP (score bajo): al free 60 min después ──
+            if not en_cola and H.puede_pasar_al_free(item["descuento"], sf, item["es_flash"]):
                 if E.reclamar_evento(f"cola:{item['tienda']}:{item['sku']}:{hoy}", fallback=True):
                     E.cola_agregar(item, sf, vip_n, delay_min=H.VENTAJA_VIP_MIN)
         except Exception as e:
             logger.warning(f"[CICLO] item: {e}")
-    if vip_n:
-        fomo_vip_al_free(vip_n)
-    logger.info(f"[CICLO] {nombre} -> items={len(items)} VIP={vip_n} nocturno={H.modo_nocturno()}")
+    logger.info(f"[CICLO] {nombre} -> items={len(items)} VIP(cola)={vip_n} nocturno={H.modo_nocturno()}")
     return vip_n
 
 
@@ -407,9 +494,10 @@ def _safe(nombre, fn):
 
 if __name__ == "__main__":
     t = T.actual()
-    logger.info(f"\n{'=' * 52}\n DROPNODE MX v3.8 — {H.ahora().strftime('%d/%m/%Y %H:%M')} MX · {t['emoji']} {t['nombre']}"
+    logger.info(f"\n{'=' * 52}\n DROPNODE MX v3.9 — {H.ahora().strftime('%d/%m/%Y %H:%M')} MX · {t['emoji']} {t['nombre']}"
                 f"{' · 🌙 NOCTURNO' if H.modo_nocturno() else ''}\n VIP 6:30-23:30 · Free 8:00-19:00 · ventana 60 min · {len(SCRAPERS)} fuentes\n{'=' * 52}")
     _safe("setup", setup)
+    _safe("cola_vip", procesar_cola_vip)
     _safe("cola_free", procesar_cola_free)
     _safe("ciclo", ejecutar_ciclo)
     _safe("comunidad_lectura", procesar_actualizaciones)
