@@ -29,8 +29,15 @@ FREE_BLOQUEA_SCORE = 8
 # Además: al free solo pasan ofertas con descuento <= 40 %; lo mejor (más descuento) es solo del VIP.
 FREE_MAX_DESCUENTO = 0.40
 
-FREE_MAX_POR_DIA   = 24       # tope diario de alertas en el canal free
-FREE_MAX_POR_CORRIDA = 2      # tope por corrida (cada 15 min)
+# ── Ritmo de publicación ──
+# VIP: lo que detecta el sistema se acumula en una cola y sale en ráfagas a lo largo del día
+VIP_LOTE_MAX     = 15         # máximo de mensajes en una ráfaga
+VIP_MAX_POR_DIA  = 300        # tope diario de alertas VIP
+VIP_TTL_HORAS    = 5          # una alerta que lleva más de 5 h en la cola ya caducó (los precios cambian)
+# Free: 2 tandas por hora (minutos 0-14 y 30-44), máximo 20 mensajes por hora
+FREE_LOTE_MAX     = 10        # mensajes por tanda
+FREE_MAX_POR_HORA = 20
+FREE_MAX_POR_DIA  = 120
 
 DIAS  = ["lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo"]
 MESES = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio",
