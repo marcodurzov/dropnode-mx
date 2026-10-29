@@ -540,7 +540,7 @@ def msg_vip(item, stats):
         m += f"✅ *Verificado con historial:* ${stats['avg']-precio:,.0f} abajo del promedio rastreado ({stats['dias']} días)\n"
     if stxt: m += f"\n{stxt}\n"
     if vida: m += f"{vida}\n"
-    m += f"\n━━━━━━━━━━━\n📋 Score: {sc}/10 · {hora_det} MX\n━━━━━━━━━━━\n\n"
+    m += f"\n━━━━━━━━━━━\n📋 Score: {sc}/10\n━━━━━━━━━━━\n\n"
     m += f"[COMPRAR AHORA]({lnk})\n\n"
     if es_rev and p_orig>precio:
         m += f"💰 *Reventa estimada: ${rl:,.0f}–${rh:,.0f} MXN*\n_Ganancia: +${rl-precio:,.0f}_\n"
@@ -644,6 +644,22 @@ def _a_cola(item, n_vip, en_vip):
     }
 
 
+def _payload_vip(item):
+    """Mensaje ya formateado + datos para registrar la alerta y pasarla al free al publicarse."""
+    stats = item.get("stats", {})
+    thumb = item.get("thumbnail", "")
+    return {
+        "modo": "Markdown", "texto": msg_vip(item, stats)[:4000], "caption": msg_vip_caption(item, stats),
+        "foto": thumb if thumb and len(thumb) > 10 and thumb.startswith("http") else "",
+        "score": item["score"], "pid": item.get("pid"), "precio": item["precio"], "descuento": item["descuento"],
+        "es_excl": H.es_exclusivo(item["descuento"], item["score"], item.get("es_flash")),
+        "item": _a_cola(item, 0, True),
+        "make": {"nombre": item["nombre"][:80], "precio": str(round(item["precio"])),
+                 "descuento": str(round(item["descuento"] * 100)), "thumbnail": item.get("thumbnail", ""),
+                 "link": item["url"], "score": item["score"], "es_flash": item.get("es_flash", False)},
+    }
+
+
 def main():
     ahora = H.ahora()
     hora = ahora.hour
@@ -719,12 +735,19 @@ def main():
     unicos.sort(key=lambda x: (x.get("es_flash", False), x["score"]), reverse=True)
     logger.info(f"[GITHUB] Únicos >=15%: {len(unicos)} flash:{sum(1 for x in unicos if x.get('es_flash'))}")
 
-    # ── VIP (6:30 AM-11:30 PM normal · resto del día solo score >= 8) ──
-    vip_n = 0; ids_vip = set(); ids_excl = set()
-    cupo_vip = max(0, min(MAX_VIP, MAX_VIP_DIA - E.contar_alertas("vip", H.dia_inicio_utc())))
-    for item in unicos:
-        if vip_n >= cupo_vip: break
+    # ── VIP: todo lo publicable entra a la COLA y main.py lo suelta en ráfagas durante el día ──
+    vip_n = 0; ids_vip = set(); ids_excl = set(); encolados_vip = 0; encolados = 0
+    cupo_directo = max(0, min(MAX_VIP, MAX_VIP_DIA - E.contar_alertas("vip", H.dia_inicio_utc())))
+    for item in unicos[:80]:
         if not H.vip_puede_publicar(item["score"]):
+            continue
+        if not E.reclamar_evento(f"vipq:mercadolibre:{item['id']}:{hoy}", fallback=True):
+            continue
+        if E.cola_vip_agregar(_payload_vip(item), item["score"]):
+            encolados_vip += 1
+            continue
+        # sin cola (tabla no creada o BD con fallo): publicar directo con el tope de siempre
+        if vip_n >= cupo_directo:
             continue
         es_excl = H.es_exclusivo(item["descuento"], item["score"], item.get("es_flash"))
         thumb = item.get("thumbnail", "")
@@ -736,22 +759,10 @@ def main():
             guardar_alerta(item.get("pid"), item["score"], "vip", item["precio"], item["descuento"])
             vip_n += 1; ids_vip.add(item["id"])
             if es_excl: ids_excl.add(item["id"])
-            if item["score"] >= 8 and MAKE_WEBHOOK_URL:
-                try:
-                    requests.post(MAKE_WEBHOOK_URL, json={
-                        "nombre": item["nombre"][:80], "precio": str(round(item["precio"])),
-                        "descuento": str(round(item["descuento"] * 100)), "thumbnail": item.get("thumbnail", ""),
-                        "link": item["url"], "score": item["score"], "es_flash": item.get("es_flash", False)}, timeout=10)
-                except: pass
+            if H.puede_pasar_al_free(item["descuento"], item["score"], item.get("es_flash")):
+                if E.cola_agregar(_a_cola(item, vip_n, True), item["score"], vip_n, delay_min=H.VENTAJA_VIP_MIN):
+                    encolados += 1
         time.sleep(5)
-
-    # ── Hacia el free: SIEMPRE por la cola, 60 min después (lo publica main.py) ──
-    encolados = 0
-    candidatos = [x for x in unicos if x["score"] >= 2 and H.puede_pasar_al_free(x["descuento"], x["score"], x.get("es_flash"))]
-    for item in sorted(candidatos, key=lambda x: x["score"], reverse=True)[:8]:
-        if E.reclamar_evento(f"cola:mercadolibre:{item['id']}:{hoy}", fallback=True):
-            if E.cola_agregar(_a_cola(item, vip_n, item["id"] in ids_vip), item["score"], vip_n, delay_min=H.VENTAJA_VIP_MIN):
-                encolados += 1
 
     # ── Teaser (sin revelar producto): solo en horario free, máximo 1 cada 2 h ──
     if ids_excl and H.en_horario_free() and E.reclamar_evento(f"fomo:{hoy}:{hora // 2}", fallback=False):
@@ -759,11 +770,11 @@ def main():
         E.tg_send(CHANNEL_FREE_ID, f"🔒 El Canal VIP tiene <b>{n} oferta{'s' if n > 1 else ''} exclusiva{'s' if n > 1 else ''}</b> hoy.\n\n<i>No se publican aquí.</i>",
                   boton=("📲 Ver Canal VIP", LAUNCHPASS_LINK))
 
-    if hora == 7 and vip_n == 0 and E.reclamar_evento(f"buenos_dias:{hoy}", fallback=False):
+    if hora == 7 and vip_n == 0 and encolados_vip == 0 and E.reclamar_evento(f"buenos_dias:{hoy}", fallback=False):
         enviar(CHANNEL_VIP_ID, "🌅 *Buenos días — DropNode VIP*\n\nEl equipo ya está revisando las ofertas del día y todas las secciones.\n_Solo publicamos cuando hay algo real._")
 
-    logger.info(f"[GITHUB v12] VIP:{vip_n} Excl:{len(ids_excl)} Cola free:{encolados} embudo={_FUN}")
-    if total_scrapeado > 0 and vip_n == 0 and encolados == 0:
+    logger.info(f"[GITHUB v12] VIP directo:{vip_n} Cola VIP:{encolados_vip} Cola free:{encolados} embudo={_FUN}")
+    if total_scrapeado > 0 and vip_n == 0 and encolados_vip == 0 and encolados == 0:
         E.admin_msg(f"ℹ️ ML ({fuente}): leí {_FUN['leidos']} productos pero no publiqué ninguno.\n"
                     f"Sin descuento ≥15%: {_FUN['sin_descuento']} · descuento falso (precio de siempre): {_FUN['descuento_falso']} · accesorios/baratos: {_FUN['basura']} · "
                     f"ya publicados antes: {_FUN['repetidos']} · publicables: {_FUN['publicables']}",
