@@ -21,6 +21,7 @@ logger = logging.getLogger(__name__)
 
 import horarios as H
 import estado as E
+import etiquetas as ETQ
 import temporada_calendario as T
 
 
@@ -103,7 +104,7 @@ def _td(t):
 def fmt_vip(item, sf):
     t = item["tienda"]
     p, po, d = item["precio_actual"], item["precio_original"], item["descuento"] * 100
-    etiqueta = "🚨 ERROR DE PRECIO" if sf >= 8 else ("🔥 HOT DEAL" if d >= 35 else "⚡ ALERTA VIP")
+    etiqueta = "🚨 ERROR DE PRECIO" if sf >= 8 else ("💰 IDEAL PARA REVENDER" if d >= 50 else ("🔥 HOT DEAL" if d >= 35 else "⚡ ALERTA VIP"))
     _, ti = temporada_activa()
     if T.bonus_item(item["nombre"], item.get("cat_nombre", "")) > 0:
         tag = f" · {T.etiqueta()}"
@@ -116,7 +117,10 @@ def fmt_vip(item, sf):
          f"<b>${p:,.0f} MXN</b> (-{d:.0f}%)\nNormal: ${po:,.0f} · ahorras ${po - p:,.0f}\n")
     if item.get("envio_gratis"):
         m += "✅ Envío gratis\n"
-    m += f"\n<a href=\"{E.link_afiliado(item['url'])}\">COMPRAR AHORA</a>\n\n<i>Reventa estimada: ${po*0.78:,.0f} - ${po*0.90:,.0f} MXN</i>"
+    m += f"\n<a href=\"{E.link_afiliado(item['url'])}\">COMPRAR AHORA</a>\n\n<i>Referencia para revender: ${po*0.78:,.0f} - ${po*0.90:,.0f} MXN</i>"
+    ht = ETQ.generar(item["nombre"], item["descuento"], sf, tienda=t, categoria=item.get("cat_nombre", ""), es_flash=bool(item.get("es_flash")))
+    if ht:
+        m += f"\n\n{ht}"
     return m
 
 
@@ -345,7 +349,7 @@ def _correr_fuente(nombre, func):
                                     precio_actual=item["precio_actual"], precio_original=item["precio_original"])
             except Exception:
                 bs = 4 if item["descuento"] >= 0.20 else 0
-            sf = min(10, bs + score_bonus_temp(item["cat_nombre"]) + T.bonus_item(item["nombre"], item["cat_nombre"]))
+            sf = min(10, bs + score_bonus_temp(item["cat_nombre"]) + T.bonus_item(item["nombre"], item["cat_nombre"]) + ETQ.bonus_marca(item["nombre"]))
             if sf < 3:
                 continue
             try:
@@ -435,6 +439,10 @@ def tareas_periodicas():
     _tarea(f"resumen_vip:{f}", 22 * 60 + 30 <= mins <= H.VIP_FIN, resumenes.resumen_vip)
     _tarea(f"semanal_vip:{sem}", dia == 6 and 20 * 60 <= mins <= 23 * 60, resumenes.resumen_semanal_vip)
     _tarea(f"salud:{f}", 8 * 60 <= mins <= 12 * 60, resumenes.reporte_salud_admin)
+    _tarea(f"buenos_dias_vip:{f}", 6 * 60 + 30 <= mins <= 10 * 60, contenido.buenos_dias_vip)
+    _tarea(f"buenos_dias_free:{f}", 8 * 60 <= mins <= 11 * 60, contenido.buenos_dias_free)
+    _tarea(f"tip_etiquetas:{sem}", dia == 2 and 12 * 60 <= mins <= 18 * 60, contenido.tip_etiquetas_vip)
+    _tarea(f"evento:{f}", 9 * 60 <= mins <= 14 * 60, contenido.evento_cuenta_regresiva)
     _tarea(f"mensual_vip:{mes}", a.day <= 3 and 10 * 60 <= mins <= 20 * 60, resumenes.resumen_mensual_vip)
 
     # Identidad: Plata Card / Nu (con aviso de referido), recordatorio del VIP y temporada
