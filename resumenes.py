@@ -132,6 +132,7 @@ def resumen_free():
         m += f"➕ <b>{len(vip) - len(top)} ofertas más</b> se publicaron hoy en el Canal VIP.\n"
     if ahorro > 500:
         m += f"💰 Ahorro acumulado hoy en el VIP: <b>~{_mxn(ahorro)} MXN</b>\n"
+    m += "\n" + E.EQUIPO_LINEA + "\n"
     m += "\n<i>Las 🔴 llegan al VIP primero; los errores de precio (🚨) se quedan solo allá.</i>\n"
     m += "<i>Los descuentos de más del 40% se quedan en el VIP, que además arranca desde las 6:30 AM.</i>"
     return bool(E.tg_send(E.cfg_int("CHANNEL_FREE_ID"), m, boton=BTN_VIP()))
@@ -217,6 +218,7 @@ def resumen_vip():
     m += "🏆 <b>TOP 5 DEL DÍA (por ahorro en pesos)</b>\n\n"
     for i, f in enumerate(top5, 1):
         m += _linea(i, f) + "\n\n"
+    m += E.EQUIPO_LINEA + "\n\n"
     m += f"🌙 <b>Esta noche:</b> de 11:31 PM a 6:29 AM solo publicamos errores de precio (score 8+). Mañana arrancamos a las 6:30 AM.\n"
     m += "<i>Los precios pueden cambiar sin previo aviso; verifica antes de comprar.</i>"
     ok = E.tg_send(E.cfg_int("CHANNEL_VIP_ID"), m)
@@ -255,6 +257,7 @@ def resumen_semanal_vip():
     m += f"📦 Alertas publicadas: <b>{n}</b> · 🚨 errores de precio: <b>{err}</b>\n"
     m += f"⭐ Mejor día: <b>{mejor_dia['fecha']}</b> ({_mxn(float(mejor_dia['ahorro'] or 0))})\n\n"
     m += f"{T.etiqueta()}: esta semana el equipo prioriza {', '.join(T.actual()['productos'][:3])}.\n"
+    m += E.EQUIPO_LINEA + "\n\n"
     m += "¿Qué quieres que busquemos la próxima semana? Cuéntalo en la comunidad 👇"
     return bool(E.tg_send(E.cfg_int("CHANNEL_VIP_ID"), m))
 
@@ -327,5 +330,6 @@ def resumen_mensual_vip():
     m += f"• Suma de los descuentos publicados: <b>{_mxn(tot)} MXN</b>\n"
     if veces >= 1:
         m += f"  (equivale a <b>{veces:.0f} veces</b> el costo mensual del VIP)\n"
+    m += "\n" + E.EQUIPO_LINEA + "\n"
     m += "\n<i>Es la suma del ahorro de todas las ofertas publicadas frente a su precio normal; lo que ahorra cada miembro depende de lo que compre.</i>"
     return bool(E.tg_send(E.cfg_int("CHANNEL_VIP_ID"), m))
