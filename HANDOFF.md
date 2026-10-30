@@ -1,4 +1,4 @@
-[HANDOFF.md](https://github.com/user-attachments/files/34150567/HANDOFF.md)
+[HANDOFF.md](https://github.com/user-attachments/files/34187477/HANDOFF.md)
 # DropNode MX — HANDOFF (pega este archivo al inicio de una conversación nueva)
 
 > Mantén este archivo en la raíz del repo `marcodurzov/dropnode-mx` y en los archivos del Proyecto de Claude.
@@ -48,6 +48,13 @@ Regla no negociable: NUNCA mencionar automatización en público. Todo es "el eq
 - VIP: todo lo publicable (ML y demás fuentes) entra a la tabla `cola_vip` y `main.py` (`procesar_cola_vip`) lo suelta en ráfagas cada corrida (cada 15 min): tamaño según lo acumulado y las corridas que quedan del día, variable, máx. 15 por ráfaga (`H.VIP_LOTE_MAX`), tope 300/día (`H.VIP_MAX_POR_DIA`), caduca a las 5 h (`H.VIP_TTL_HORAS`). De madrugada: solo score ≥ 8, máx. 3 por corrida. Si la tabla no existe, se publica directo con el tope viejo (3 por corrida). **Hay que correr en Supabase el bloque `cola_vip` de `schema.sql`.**
 - Free: la cola de 60 min cuenta desde que el mensaje REALMENTE salió en el VIP (se encola al publicarse). Dos tandas por hora (minutos 0-14 y 30-44), máx. 10 por tanda, 20 por hora y 120 por día; siempre ≤ 40 % de descuento.
 - Tiendas nuevas candidatas: Liverpool (outlet, bolsas, gamer), Innovasport, Dportenis, Puma, Skechers, Price Shoes. Sam's, Coppel, Bodega y Elektra se extraen con evidencia (ahorro/precio de lista).
+
+## v5.1 (29-oct-2026)
+- Fotos garantizadas en el VIP: URL -> descarga propia -> og:image de la página -> tarjeta generada (`imagenes.py`) -> texto. Contenido del VIP protegido (`protect_content`).
+- Etiquetas (#) en todas las alertas del VIP, de cualquier tienda (`etiquetas.py`); el free no lleva etiquetas. Bonus de score para marcas conocidas.
+- `[REVENTA]` -> `IDEAL PARA REVENDER`; ML muestra "🏪 Mercado Libre". Textos de referido: "enlace de invitación ... programa de referidos".
+- El equipo de DropNode aparece en resúmenes, buenos días (VIP 6:30-10:00, free 8:00-11:00) y cuenta regresiva (Buen Fin, Black Friday, Cyber Monday). Tip semanal de etiquetas en el VIP.
+- Docs: `docs/SEGURIDAD.md`, `docs/RIFA_DISENO.md`, `docs/CRECIMIENTO.md`; plantillas para repo privado en `repo_privado/`.
 
 ## Arquitectura
 - `bot.yml` (cada 15 min) → `main.py`: cola free, 2 fuentes por corrida, lectura/moderación del grupo, programados.
