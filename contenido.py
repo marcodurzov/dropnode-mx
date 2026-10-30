@@ -8,13 +8,14 @@
 # =============================================================
 import re, random, hashlib, logging
 from urllib.parse import urlparse
+from datetime import date
 
 import estado as E
 import horarios as H
 import temporada_calendario as T
 
 logger = logging.getLogger(__name__)
-TRANSPARENCIA = "<i>Enlace de referido: si te registras con él, DropNode recibe una recompensa sin costo extra para ti.</i>"
+TRANSPARENCIA = "<i>Enlace de invitación: al registrarte con él accedes a los beneficios del programa de referidos.</i>"
 
 
 def _productos():
@@ -83,6 +84,7 @@ VIP_FREE = [
      "• Alertas de 6:30 AM a 11:30 PM (y de madrugada si aparece un error de precio)\n"
      "• Descuentos de más del 40% que no llegan a este canal\n"
      "• Verificación contra el historial de precios\n"
+     "• Etiquetas en cada oferta para buscar por producto, marca o tienda (#tenis, #nike, #liverpool…)\n"
      "• Cierre diario con el ahorro del día\n"
      "• Búsquedas que pide la comunidad\n\n$299 MXN/mes"),
     ("💡 <b>Una sola compra a buen precio puede pagar el mes</b>\n\n"
@@ -176,3 +178,57 @@ def oferta_manual(cmd):
         E.cola_agregar(item, 6, 1, delay_min=H.VENTAJA_VIP_MIN)
         en_free = " Pasará al free en 1 hora."
     return f"✅ Publicada en el VIP.{en_free}"
+
+
+# ─────────────────────────────────────────────
+# Buenos días, tip de etiquetas y cuenta regresiva de eventos (siempre "el equipo")
+# ─────────────────────────────────────────────
+def buenos_dias_vip():
+    t = T.actual()
+    return bool(E.tg_send(E.cfg_int("CHANNEL_VIP_ID"),
+        f"🌅 <b>Buenos días — Canal VIP</b>\n\nEl equipo de DropNode ya está monitoreando las tiendas para encontrar las mejores ofertas de hoy.\n\n"
+        f"{t['emoji']} Esta temporada: <b>{E.esc(t['nombre'])}</b> · el equipo prioriza {E.esc(', '.join(t['productos'][:3]))}.\n\n"
+        "<i>Recuerda: busca por etiqueta (#tenis, #celulares, #errorprecio…) para ver todo lo relacionado.</i>"))
+
+
+def buenos_dias_free():
+    return bool(E.tg_send(E.cfg_int("CHANNEL_FREE_ID"),
+        "🌅 <b>Buenos días</b>\n\nEl equipo de DropNode ya está buscando las mejores ofertas de hoy. "
+        "Aquí compartimos una selección; lo mejor llega primero al Canal VIP.",
+        boton=("📲 Canal VIP — $299/mes", E.cfg("LAUNCHPASS_LINK"))))
+
+
+def tip_etiquetas_vip():
+    return bool(E.tg_send(E.cfg_int("CHANNEL_VIP_ID"),
+        "🔎 <b>Tip VIP: busca por etiquetas</b>\n\nCada oferta del VIP lleva etiquetas. Toca una o escríbela en el buscador del canal y verás "
+        "todo lo relacionado:\n\n"
+        "• Producto: #celulares #laptops #tenis #bolsas #perfumes #electrodomesticos\n"
+        "• Tipo de oferta: #errorprecio #hotdeal #solohoy #idealparareventa\n"
+        "• Tienda: #mercadolibre #elektra #liverpool #coppel #samsclub\n"
+        "• Marca: #nike #apple #samsung #guess…\n\n"
+        "<i>Esta búsqueda es exclusiva del Canal VIP.</i>"))
+
+
+EVENTOS = [("el Buen Fin", date(2026, 11, 13), "🛍️"), ("Black Friday", date(2026, 11, 27), "⚫"), ("Cyber Monday", date(2026, 11, 30), "💻")]
+
+
+def evento_cuenta_regresiva():
+    """Avisos 14, 7, 3 y 1 días antes y el día de arranque. None si hoy no toca ninguno."""
+    hoy = H.ahora().date()
+    for nombre, ini, emoji in EVENTOS:
+        d = (ini - hoy).days
+        if d not in (14, 7, 3, 1, 0):
+            continue
+        if d == 0:
+            vip = f"{emoji} <b>Arrancó {E.esc(nombre)}</b>\n\nEl equipo de DropNode está atento a las mejores ofertas y las publica primero aquí."
+        else:
+            vip = (f"{emoji} <b>Faltan {d} día{'s' if d > 1 else ''} para {E.esc(nombre)}</b>\n\n"
+                   "El equipo de DropNode se prepara para encontrar las mejores ofertas. Mantén las notificaciones del canal activas.")
+        ok = bool(E.tg_send(E.cfg_int("CHANNEL_VIP_ID"), vip))
+        if H.en_horario_free():
+            E.tg_send(E.cfg_int("CHANNEL_FREE_ID"),
+                      f"{emoji} <b>{'Arrancó' if d == 0 else 'Se acerca'} {E.esc(nombre)}</b>\n\nEl equipo de DropNode está atento a las mejores ofertas. "
+                      "Los descuentos más altos llegan primero al Canal VIP.", boton=("📲 Canal VIP — $299/mes", E.cfg("LAUNCHPASS_LINK")))
+        E.tg_send(E.cfg_int("GROUP_ID"), f"{emoji} {'Arrancó' if d == 0 else 'Faltan ' + str(d) + ' día(s) para'} {E.esc(nombre)}. ¿Qué producto estás esperando? Escribe /pedir seguido del producto y el equipo lo busca 👇")
+        return ok
+    return None
