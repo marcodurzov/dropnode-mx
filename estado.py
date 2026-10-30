@@ -34,6 +34,9 @@ def cfg(nombre, default=""):
     return default
 
 
+EQUIPO_LINEA = "<i>El equipo de DropNode monitorea las tiendas todo el día para encontrar las mejores ofertas.</i>"
+
+
 def cfg_int(nombre, default=0):
     try:
         return int(str(cfg(nombre, default)).strip())
@@ -170,8 +173,16 @@ def esc(s):
     return html.escape(str(s or ""), quote=False)
 
 
-def tg_send(chat_id, texto, boton=None, parse_mode="HTML", foto=None, reply_to=None):
-    """Devuelve message_id o None. boton = (texto, url)."""
+def _es_vip(chat_id):
+    try:
+        return str(chat_id) == str(cfg_int("CHANNEL_VIP_ID"))
+    except Exception:
+        return False
+
+
+def tg_send(chat_id, texto, boton=None, parse_mode="HTML", foto=None, reply_to=None, solo_foto=False):
+    """Devuelve message_id o None. boton = (texto, url). En el canal VIP el contenido va protegido
+    (no se puede reenviar ni guardar). solo_foto=True: si la foto falla NO manda texto (devuelve None)."""
     if not chat_id or not TELEGRAM_TOKEN:
         return None
     payload = {"chat_id": chat_id, "disable_web_page_preview": True}
@@ -179,6 +190,8 @@ def tg_send(chat_id, texto, boton=None, parse_mode="HTML", foto=None, reply_to=N
         payload["parse_mode"] = parse_mode
     if boton and boton[1]:
         payload["reply_markup"] = {"inline_keyboard": [[{"text": boton[0], "url": boton[1]}]]}
+    if _es_vip(chat_id):
+        payload["protect_content"] = True
     if reply_to:
         payload["reply_to_message_id"] = reply_to
         payload["allow_sending_without_reply"] = True
@@ -188,6 +201,8 @@ def tg_send(chat_id, texto, boton=None, parse_mode="HTML", foto=None, reply_to=N
             r = requests.post(f"{TG}/sendPhoto", json=payload, timeout=20).json()
             if r.get("ok"):
                 return r["result"]["message_id"]
+            if solo_foto:
+                return None
             payload.pop("photo", None); payload.pop("caption", None)
         payload["text"] = texto[:4096]
         r = requests.post(f"{TG}/sendMessage", json=payload, timeout=15).json()
@@ -566,14 +581,120 @@ def guardar_alerta_pid(pid, score, canal, precio, descuento, msg_id=None):
         logger.warning(f"[ALERTA] {e}")
 
 
+# ─────────────────────────────────────────────
+# Fotos: que TODA alerta del VIP lleve imagen
+# ─────────────────────────────────────────────
+_UA_IMG = {"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/124.0.0.0 Safari/537.36",
+           "Accept": "image/avif,image/webp,image/*,*/*;q=0.8", "Accept-Language": "es-MX,es;q=0.9"}
+
+
+def url_absoluta(url, base=""):
+    u = str(url or "").strip()
+    if not u or u.startswith("data:"):
+        return ""
+    if u.startswith("//"):
+        return "https:" + u
+    if u.startswith("/") and base:
+        return base.rstrip("/") + u
+    return u if u.startswith("http") else ""
+
+
+def _bajar_imagen(url, referer=""):
+    try:
+        h = dict(_UA_IMG)
+        if referer:
+            h["Referer"] = referer
+        r = requests.get(url, headers=h, timeout=15)
+        if r.status_code == 200 and len(r.content) > 3000 and "image" in r.headers.get("content-type", "image"):
+            return r.content
+    except Exception:
+        pass
+    return None
+
+
+def _og_image(url_producto):
+    """Foto principal de la página del producto (etiqueta og:image), por si la tarjeta no traía imagen."""
+    try:
+        r = requests.get(url_producto, headers={**_UA_IMG, "Accept": "text/html,*/*"}, timeout=15)
+        if r.status_code != 200:
+            return ""
+        m = re.search(r'<meta[^>]+property=["\']og:image["\'][^>]+content=["\']([^"\']+)', r.text) or \
+            re.search(r'<meta[^>]+content=["\']([^"\']+)["\'][^>]+property=["\']og:image', r.text)
+        return url_absoluta(html.unescape(m.group(1))) if m else ""
+    except Exception:
+        return ""
+
+
+def tg_send_foto_bytes(chat_id, caption, datos, parse_mode=None):
+    if not chat_id or not TELEGRAM_TOKEN or not datos:
+        return None
+    data = {"chat_id": chat_id, "caption": caption[:1024]}
+    if parse_mode:
+        data["parse_mode"] = parse_mode
+    if _es_vip(chat_id):
+        data["protect_content"] = "true"
+    try:
+        r = requests.post(f"{TG}/sendPhoto", data=data, files={"photo": ("oferta.jpg", datos)}, timeout=30).json()
+        if r.get("ok"):
+            return r["result"]["message_id"]
+        logger.warning(f"[TG foto] {r.get('description', '?')}")
+    except Exception as ex:
+        logger.warning(f"[TG foto] {ex}")
+    return None
+
+
 def enviar_payload(chat_id, p):
-    """Envía un mensaje ya formateado: foto+pie si hay foto, texto si no; y sin formato si Telegram rechaza el formato."""
+    """Mensaje ya formateado. Orden: foto por URL -> foto descargada -> foto de la página del producto ->
+    tarjeta generada -> (último recurso) solo texto. Si Telegram rechaza el formato, reintenta sin formato."""
     modo = p.get("modo") or None
-    foto = p.get("foto") if str(p.get("foto") or "").startswith("http") else None
     texto = p.get("texto") or ""
     caption = p.get("caption") or texto[:1024]
-    mid = tg_send(chat_id, caption if foto else texto, parse_mode=modo, foto=foto)
+    it = p.get("item") or {}
+    plano_tx = re.sub(r"[*_`\[\]]", "", texto)
+    plano_cap = re.sub(r"[*_`\[\]]", "", caption)
+
+    def intento_foto(url):
+        if not url:
+            return None
+        mid = tg_send(chat_id, caption, parse_mode=modo, foto=url, solo_foto=True)
+        if not mid and modo:
+            mid = tg_send(chat_id, plano_cap, parse_mode=None, foto=url, solo_foto=True)
+        return mid
+
+    foto = url_absoluta(p.get("foto"), "")
+    fuentes = [foto] if foto else []
+    mid = intento_foto(foto) if foto else None
+    if mid:
+        return mid
+    if foto:                                           # la tienda no deja que Telegram la baje: la bajamos nosotros
+        datos = _bajar_imagen(foto, it.get("url") or "")
+        if datos:
+            mid = tg_send_foto_bytes(chat_id, caption, datos, modo) or tg_send_foto_bytes(chat_id, plano_cap, datos, None)
+            if mid:
+                return mid
+    if it.get("url"):                                  # foto principal de la página del producto
+        og = _og_image(it["url"])
+        if og and og not in fuentes:
+            mid = intento_foto(og)
+            if mid:
+                return mid
+            datos = _bajar_imagen(og, it["url"])
+            if datos:
+                mid = tg_send_foto_bytes(chat_id, caption, datos, modo) or tg_send_foto_bytes(chat_id, plano_cap, datos, None)
+                if mid:
+                    return mid
+    try:                                               # tarjeta generada con nombre, precio y descuento
+        import imagenes
+        datos = imagenes.tarjeta(it.get("nombre", ""), it.get("precio_actual") or p.get("precio") or 0,
+                                 it.get("precio_original") or 0, it.get("descuento") or p.get("descuento") or 0,
+                                 it.get("tienda", ""))
+        if datos:
+            mid = tg_send_foto_bytes(chat_id, caption, datos, modo) or tg_send_foto_bytes(chat_id, plano_cap, datos, None)
+            if mid:
+                return mid
+    except Exception as ex:
+        logger.warning(f"[FOTO] tarjeta: {ex}")
+    mid = tg_send(chat_id, texto, parse_mode=modo)
     if not mid and modo:
-        plano = re.sub(r"[*_`\[\]]", "", texto)
-        mid = tg_send(chat_id, plano, parse_mode=None)
+        mid = tg_send(chat_id, plano_tx, parse_mode=None)
     return mid
