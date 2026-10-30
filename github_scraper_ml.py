@@ -16,6 +16,7 @@ import re, unicodedata
 import temporada_calendario as T
 import peticiones as P
 import navegador as NAV
+import etiquetas as ETQ
 
 logging.basicConfig(level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s", stream=sys.stdout)
@@ -389,7 +390,7 @@ def enviar(chat_id, texto, modo="Markdown"):
     try:
         r = requests.post(TELEGRAM_API+"/sendMessage", json={
             "chat_id":chat_id,"text":texto,"parse_mode":modo,
-            "disable_web_page_preview":True}, timeout=15)
+            "disable_web_page_preview":True,"protect_content":chat_id==CHANNEL_VIP_ID}, timeout=15)
         d = r.json()
         if d.get("ok"): return d["result"]["message_id"]
         logger.warning("[TG] "+str(d.get("description","")))
@@ -405,7 +406,7 @@ def enviar_foto(chat_id, foto_url, caption, modo="Markdown"):
     try:
         r = requests.post(TELEGRAM_API+"/sendPhoto", json={
             "chat_id":chat_id,"photo":foto_url,
-            "caption":caption[:1024],"parse_mode":modo}, timeout=20)
+            "caption":caption[:1024],"parse_mode":modo,"protect_content":chat_id==CHANNEL_VIP_ID}, timeout=20)
         d = r.json()
         if d.get("ok"): return d["result"]["message_id"]
         return enviar(chat_id, caption, modo)
@@ -440,59 +441,7 @@ def score(descuento, stock, precio, cupon, envio_gratis=False, es_flash=False):
 # HASHTAGS — sin falsos positivos
 # ─────────────────────────────────────────────
 def generar_hashtags(nombre, descuento, sc, cupon=False, es_flash=False, categoria=""):
-    n = nombre.lower(); tags = []
-    if any(w in n for w in ["minoxidil","shampoo","crema","vitamina","suplemento",
-                              "maquillaje","perfume","serum","colageno","proteina"]):
-        tags.append("#saludybelleza")
-    elif any(w in n for w in ["camisa","pantalon","zapato","tenis","vestido","licra",
-                               "leggin","blusa","ropa","calcetines","playera",
-                               "chamarra","short","sudadera","calzado","bota"]):
-        tags.append("#moda")
-    elif any(w in n for w in ["llave","taladro","herramienta","martillo","tornillo",
-                               "destornillador","sierra","impacto","torque"]):
-        tags.append("#herramientas")
-    elif any(w in n for w in ["silla","mesa","sofa","lampara","colchon","cortina",
-                               "toalla","sabana","almohada","mueble","cajonera"]):
-        tags.append("#hogar")
-    elif any(w in n for w in ["juguete","muneca","lego","muñeca","figura","plush"]):
-        tags.append("#juguetes")
-    elif any(w in n for w in ["iphone","galaxy","celular","smartphone","redmi","poco","moto g"]):
-        tags.append("#celulares")
-    elif any(w in n for w in ["laptop","notebook","macbook","thinkpad","ideapad","chromebook"]):
-        tags.append("#laptops")
-    elif any(w in n for w in ["televisor"," tv ","smart tv","oled","qled"]):
-        tags.append("#televisores")
-    elif any(w in n for w in ["audifonos","airpods","bocina","speaker","wh-","wf-","earbuds"]):
-        tags.append("#audio")
-    elif any(w in n for w in ["playstation","xbox","nintendo","switch","ps5","ps4"]):
-        tags.append("#gaming")
-    elif any(w in n for w in ["tablet","ipad"]):
-        tags.append("#tablets")
-    elif any(w in n for w in ["smartwatch","reloj inteligente","band "]):
-        tags.append("#wearables")
-    elif any(w in n for w in ["impresora","router","monitor","teclado","mouse","disco","ssd","memoria"]):
-        tags.append("#computacion")
-    elif any(w in n for w in ["lavadora","refrigerador","estufa","microondas","licuadora","aspiradora"]):
-        tags.append("#electrodomesticos")
-    elif categoria and len(categoria) > 2:
-        tags.append("#"+categoria.lower().replace(" ",""))
-
-    marcas = {
-        "apple":["iphone","ipad","macbook","airpods"],"samsung":["samsung"],
-        "sony":["sony"],"lenovo":["lenovo","thinkpad"],"dell":["dell","inspiron"],
-        "hp":[" hp "],"asus":["asus"],"xiaomi":["xiaomi","redmi","poco"],
-        "motorola":["motorola","moto "],"lg":[" lg "],"bosch":["bosch"],
-        "dewalt":["dewalt"],"milwaukee":["milwaukee"],
-    }
-    for marca, kws in marcas.items():
-        if any(kw in n for kw in kws): tags.append(f"#{marca}"); break
-
-    if sc >= 8 or descuento >= 0.50: tags.append("#errorprecio")
-    elif descuento >= 0.35:           tags.append("#hotdeal")
-    if es_flash:                      tags.append("#solohoy")
-    if cupon:                         tags.append("#cupon")
-    if descuento >= 0.50:             tags.append("#reventa")
-    return " ".join(tags)
+    return ETQ.generar(nombre, descuento, sc, tienda="mercadolibre", categoria=categoria, cupon=cupon, es_flash=es_flash)
 
 # ─────────────────────────────────────────────
 # FORMATOS
@@ -520,7 +469,7 @@ def msg_vip(item, stats):
     hora_det=datetime.now(TZ_MEXICO).strftime("%H:%M")
     es_rev=item["descuento"]>=0.50
 
-    if es_rev:      icono="💰"; tag="[REVENTA] EXCLUSIVO VIP"
+    if es_rev:      icono="💰"; tag="IDEAL PARA REVENDER — EXCLUSIVO VIP"
     elif es_flash:  icono="⏰"; tag="SOLO HOY — VIP PRIMERO"
     elif sc>=8 or item["descuento"]>=0.50: icono="🚨"; tag="ERROR DE PRECIO — SOLO VIP"
     elif item["descuento"]>=DESCUENTO_HOT: icono="🔥"; tag="HOT DEAL — EXCLUSIVO VIP"
@@ -528,7 +477,7 @@ def msg_vip(item, stats):
     else:           icono="⚡"; tag="ALERTA VIP"
 
     stxt=_stk(stk)
-    m  = f"{icono} *{tag}*\n\n*{nombre}*\n\n"
+    m  = f"{icono} *{tag}*\n\n*{nombre}*\n🏪 Mercado Libre\n\n"
     m += f"Precio ahora: *${precio:,.0f} MXN*\n"
     if p_orig>precio: m += f"Precio original: ${p_orig:,.0f} MXN\n"
     m += f"Descuento: *-{desc:.0f}%*\n"
@@ -543,9 +492,9 @@ def msg_vip(item, stats):
     m += f"\n━━━━━━━━━━━\n📋 Score: {sc}/10\n━━━━━━━━━━━\n\n"
     m += f"[COMPRAR AHORA]({lnk})\n\n"
     if es_rev and p_orig>precio:
-        m += f"💰 *Reventa estimada: ${rl:,.0f}–${rh:,.0f} MXN*\n_Ganancia: +${rl-precio:,.0f}_\n"
+        m += f"💰 *Precio de reventa sugerido: ${rl:,.0f}–${rh:,.0f} MXN*\n_Margen estimado: +${rl-precio:,.0f}_\n"
     elif p_orig>precio:
-        m += f"_Reventa: ${rl:,.0f}–${rh:,.0f} MXN_\n"
+        m += f"_Referencia para revender: ${rl:,.0f}–${rh:,.0f} MXN_\n"
     ht = generar_hashtags(nombre, item["descuento"], sc, cupon, es_flash)
     if ht: m += f"\n{ht}"
     return m
@@ -559,14 +508,14 @@ def msg_vip_caption(item, stats):
     rl=p_orig*0.78; rh=p_orig*0.90; vida=_vida(item["descuento"],stk,es_flash)
     es_rev=item["descuento"]>=0.50
 
-    if es_rev:     icono="💰"; tag="[REVENTA]"
+    if es_rev:     icono="💰"; tag="IDEAL PARA REVENDER"
     elif es_flash: icono="⏰"; tag="SOLO HOY"
     elif sc>=8 or item["descuento"]>=0.50: icono="🚨"; tag="ERROR PRECIO"
     elif item["descuento"]>=DESCUENTO_HOT: icono="🔥"; tag="HOT DEAL"
     else:          icono="⚡"; tag="VIP"
 
     stxt=_stk(stk)
-    m  = f"{icono} *{tag}*\n\n*{nombre}*\n\n"
+    m  = f"{icono} *{tag}*\n\n*{nombre}*\n🏪 Mercado Libre\n\n"
     m += f"*${precio:,.0f} MXN* (−{desc:.0f}%)\n"
     if p_orig>precio: m += f"Normal: ${p_orig:,.0f}\n"
     if ev: m += "✅ Envío gratis\n"
@@ -576,9 +525,9 @@ def msg_vip_caption(item, stats):
     if stats.get("avg") and precio < stats["avg"]*0.90 and stats.get("dias",0) >= 7: m += "✅ Verificado con historial\n"
     m += f"\nScore: {sc}/10\n"
     if es_rev and p_orig>precio:
-        m += f"💰 Reventa: ${rl:,.0f}–${rh:,.0f}\nGanancia: *+${rl-precio:,.0f}*\n"
+        m += f"💰 Reventa sugerida: ${rl:,.0f}–${rh:,.0f}\nMargen estimado: *+${rl-precio:,.0f}*\n"
     elif p_orig>precio:
-        m += f"_Reventa: ${rl:,.0f}–${rh:,.0f}_\n"
+        m += f"_Referencia para revender: ${rl:,.0f}–${rh:,.0f}_\n"
     m += f"\n[COMPRAR AHORA]({lnk})\n"
     ht = generar_hashtags(nombre, item["descuento"], sc, cupon, es_flash)
     if ht: m += f"\n{ht}"
@@ -619,6 +568,7 @@ def procesar(prod_raw, pagina_es_flash=False):
         if hist_ok and precio > stats["avg"]*0.97 and not (cupon and c_monto>0):
             _FUN["descuento_falso"] += 1; return None
         sc=score(descuento,stk,precio,cupon,ev,es_flash)
+        sc = min(10, sc + ETQ.bonus_marca(nombre))
         if hist_ok and precio <= stats["avg"]*0.5: sc = max(sc, 8)          # error de precio verificado
         if not E.puede_publicar_pid(pid,sc,precio,"vip"): _FUN["repetidos"] += 1; return None   # política de repeticiones (estado.py)
         _FUN["publicables"] += 1
@@ -769,9 +719,6 @@ def main():
         n = len(ids_excl)
         E.tg_send(CHANNEL_FREE_ID, f"🔒 El Canal VIP tiene <b>{n} oferta{'s' if n > 1 else ''} exclusiva{'s' if n > 1 else ''}</b> hoy.\n\n<i>No se publican aquí.</i>",
                   boton=("📲 Ver Canal VIP", LAUNCHPASS_LINK))
-
-    if hora == 7 and vip_n == 0 and encolados_vip == 0 and E.reclamar_evento(f"buenos_dias:{hoy}", fallback=False):
-        enviar(CHANNEL_VIP_ID, "🌅 *Buenos días — DropNode VIP*\n\nEl equipo ya está revisando las ofertas del día y todas las secciones.\n_Solo publicamos cuando hay algo real._")
 
     logger.info(f"[GITHUB v12] VIP directo:{vip_n} Cola VIP:{encolados_vip} Cola free:{encolados} embudo={_FUN}")
     if total_scrapeado > 0 and vip_n == 0 and encolados_vip == 0 and encolados == 0:
